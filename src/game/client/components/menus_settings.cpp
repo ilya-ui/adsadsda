@@ -1443,7 +1443,8 @@ void CMenus::RenderSettings(CUIRect MainView)
 		Localize("Sound"),
 		Localize("DDNet"),
 		Localize("Assets"),
-		"456"};
+		"5years",
+		"5years"};
 	static CButtonContainer s_aTabButtons[SETTINGS_LENGTH];
 
 	for(int i = 0; i < SETTINGS_LENGTH; i++)
@@ -1509,8 +1510,13 @@ void CMenus::RenderSettings(CUIRect MainView)
 	}
 	else if(g_Config.m_UiSettingsPage == SETTINGS_456)
 	{
-		GameClient()->m_MenuBackground.ChangePosition(CMenuBackground::POS_SETTINGS_GENERAL); // Reuse general position or any other
+		GameClient()->m_MenuBackground.ChangePosition(CMenuBackground::POS_SETTINGS_GENERAL);
 		RenderSettings456(MainView);
+	}
+	else if(g_Config.m_UiSettingsPage == SETTINGS_5YEARS)
+	{
+		GameClient()->m_MenuBackground.ChangePosition(CMenuBackground::POS_SETTINGS_GENERAL);
+		RenderSettings5Years(MainView);
 	}
 	else
 	{
@@ -3051,7 +3057,15 @@ int CMenus::CPopupMapPickerContext::MapListFetchCallback(const CFsFileInfo *pInf
 
 void CMenus::RenderSettings456(CUIRect MainView)
 {
-	CUIRect Button;
+	// Redirect to 5years
+	RenderSettings5Years(MainView);
+}
+
+void CMenus::RenderSettings5Years(CUIRect MainView)
+{
+	CUIRect Button, Label;
+
+	// Rainbow section
 	MainView.HSplitTop(20.0f, &Button, &MainView);
 	if(DoButton_CheckBox(&g_Config.m_ClRainbowPlayer, "Rainbow Player", g_Config.m_ClRainbowPlayer, &Button))
 		g_Config.m_ClRainbowPlayer ^= 1;
@@ -3060,36 +3074,78 @@ void CMenus::RenderSettings456(CUIRect MainView)
 	if(DoButton_CheckBox(&g_Config.m_ClRainbowTrail, "Rainbow Trail", g_Config.m_ClRainbowTrail, &Button))
 		g_Config.m_ClRainbowTrail ^= 1;
 
-	MainView.HSplitTop(20.0f, &Button, &MainView);
-	if(DoButton_CheckBox(&g_Config.m_ClShowRussia456, "Show Russia 456", g_Config.m_ClShowRussia456, &Button))
-		g_Config.m_ClShowRussia456 ^= 1;
+	MainView.HSplitTop(10.0f, nullptr, &MainView);
 
 	MainView.HSplitTop(20.0f, &Button, &MainView);
-	if(DoButton_CheckBox(&g_Config.m_ClAimbot, "Aimbot", g_Config.m_ClAimbot, &Button))
-		g_Config.m_ClAimbot ^= 1;
+	if(DoButton_CheckBox(&g_Config.m_ClFakeSuper, "Fake Super (Local Only)", g_Config.m_ClFakeSuper, &Button))
+		g_Config.m_ClFakeSuper ^= 1;
+
+	MainView.HSplitTop(20.0f, nullptr, &MainView);
+
+	// Practice Mode section
+	MainView.HSplitTop(20.0f, &Label, &MainView);
+	Ui()->DoLabel(&Label, "--- Practice Mode ---", 14.0f, TEXTALIGN_ML);
+
+	MainView.HSplitTop(5.0f, nullptr, &MainView);
+
+	// Practice mode toggle button
+	bool PracticeActive = GameClient()->m_PracticeActive;
+	MainView.HSplitTop(25.0f, &Button, &MainView);
+	static CButtonContainer s_TogglePracticeButton;
+	if(DoButton_Menu(&s_TogglePracticeButton, PracticeActive ? "Disable Practice Mode" : "Enable Practice Mode", 0, &Button))
+	{
+		GameClient()->TogglePractice();
+	}
+
+	MainView.HSplitTop(10.0f, nullptr, &MainView);
+	MainView.HSplitTop(15.0f, &Label, &MainView);
+	Ui()->DoLabel(&Label, "Auto-checkpoint on ground, auto-reset on freeze", 10.0f, TEXTALIGN_ML);
+
+	MainView.HSplitTop(20.0f, nullptr, &MainView);
+
+	// Drawing section
+	MainView.HSplitTop(20.0f, &Label, &MainView);
+	Ui()->DoLabel(&Label, "--- Screen Drawing ---", 14.0f, TEXTALIGN_ML);
+
+	CUIRect DrawBtnRow, StartBtn, StopBtn;
+	MainView.HSplitTop(20.0f, &DrawBtnRow, &MainView);
+	DrawBtnRow.VSplitMid(&StartBtn, &StopBtn);
+	StartBtn.VSplitRight(5.0f, &StartBtn, nullptr);
+	StopBtn.VSplitLeft(5.0f, nullptr, &StopBtn);
+
+	bool DrawingActive = GameClient()->m_ScreenDrawing.IsActive();
+
+	static CButtonContainer s_StartDrawButton;
+	if(DoButton_Menu(&s_StartDrawButton, "Start Drawing", DrawingActive ? 1 : 0, &StartBtn))
+	{
+		if(!DrawingActive)
+			GameClient()->m_ScreenDrawing.Toggle();
+	}
+
+	static CButtonContainer s_StopDrawButton;
+	if(DoButton_Menu(&s_StopDrawButton, "Stop Drawing", DrawingActive ? 0 : 1, &StopBtn))
+	{
+		if(DrawingActive)
+			GameClient()->m_ScreenDrawing.Toggle();
+	}
+
+	MainView.HSplitTop(5.0f, nullptr, &MainView);
 
 	MainView.HSplitTop(20.0f, &Button, &MainView);
-	if(DoButton_CheckBox(&g_Config.m_ClAimbotOnlyHook, "Aimbot Only Hook", g_Config.m_ClAimbotOnlyHook, &Button))
-		g_Config.m_ClAimbotOnlyHook ^= 1;
+	Ui()->DoScrollbarOption(&g_Config.m_ClDrawThickness, &g_Config.m_ClDrawThickness, &Button, "Line Thickness", 1, 10);
 
-	MainView.HSplitTop(20.0f, &Button, &MainView);
-	if(DoButton_CheckBox(&g_Config.m_ClAimbotShowRange, "Show Aimbot Range", g_Config.m_ClAimbotShowRange, &Button))
-		g_Config.m_ClAimbotShowRange ^= 1;
+	static CButtonContainer s_DrawColorResetId;
+	ColorHSLA PickedColor = DoLine_ColorPicker(&s_DrawColorResetId, 20.0f, 13.0f, 5.0f, &MainView, "Drawing Color", &g_Config.m_ClDrawColor, ColorRGBA(1.0f, 1.0f, 1.0f, 1.0f), false, nullptr, false);
 
-	MainView.HSplitTop(20.0f, &Button, &MainView);
-	if(DoButton_CheckBox(&g_Config.m_ClAutoFight, "Super Auto Fighting", g_Config.m_ClAutoFight, &Button))
-		g_Config.m_ClAutoFight ^= 1;
+	GameClient()->m_ScreenDrawing.SetThickness(static_cast<float>(g_Config.m_ClDrawThickness));
+	ColorRGBA DrawColor = color_cast<ColorRGBA>(PickedColor);
+	GameClient()->m_ScreenDrawing.SetColor(DrawColor);
 
+	MainView.HSplitTop(10.0f, nullptr, &MainView);
 	MainView.HSplitTop(20.0f, &Button, &MainView);
-	if(DoButton_CheckBox(&g_Config.m_ClAutoFightAvoidFreeze, "Auto Fight Avoid Freeze", g_Config.m_ClAutoFightAvoidFreeze, &Button))
-		g_Config.m_ClAutoFightAvoidFreeze ^= 1;
-
-	MainView.HSplitTop(20.0f, &Button, &MainView);
-	Ui()->DoScrollbarOption(&g_Config.m_ClAimbotRange, &g_Config.m_ClAimbotRange, &Button, "Aimbot Range", 100, 2000);
-
-	MainView.HSplitTop(20.0f, &Button, &MainView);
-	Ui()->DoScrollbarOption(&g_Config.m_ClAutoFightRange, &g_Config.m_ClAutoFightRange, &Button, "Auto Fight Range", 200, 2000);
-
-	MainView.HSplitTop(20.0f, &Button, &MainView);
-	Ui()->DoScrollbarOption(&g_Config.m_ClAutoFightFreezeSearch, &g_Config.m_ClAutoFightFreezeSearch, &Button, "Freeze Search Radius", 64, 800);
+	static CButtonContainer s_ClearButton;
+	if(DoButton_Menu(&s_ClearButton, "Clear All Drawings", 0, &Button))
+	{
+		GameClient()->m_ScreenDrawing.Clear();
+	}
 }

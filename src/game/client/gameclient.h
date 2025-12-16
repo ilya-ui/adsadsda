@@ -52,6 +52,7 @@
 #include "components/mapimages.h"
 #include "components/maplayers.h"
 #include "components/mapsounds.h"
+#include "components/maptravel.h"
 #include "components/menu_background.h"
 #include "components/menus.h"
 #include "components/motd.h"
@@ -68,6 +69,7 @@
 #include "components/tooltips.h"
 #include "components/touch_controls.h"
 #include "components/voting.h"
+#include "components/screen_drawing.h"
 
 #include <vector>
 
@@ -171,6 +173,7 @@ public:
 	CFreezeBars m_FreezeBars;
 	CItems m_Items;
 	CMapImages m_MapImages;
+	CMapTravel m_MapTravel;
 
 	CMapLayers m_MapLayersBackground = CMapLayers{ERenderType::RENDERTYPE_BACKGROUND};
 	CMapLayers m_MapLayersForeground = CMapLayers{ERenderType::RENDERTYPE_FOREGROUND};
@@ -185,6 +188,8 @@ public:
 	CTooltips m_Tooltips;
 
 	CLocalServer m_LocalServer;
+
+	CScreenDrawing m_ScreenDrawing;
 
 private:
 	std::vector<class CComponent *> m_vpAll;
@@ -241,6 +246,11 @@ private:
 	static void ConTeam(IConsole::IResult *pResult, void *pUserData);
 	static void ConKill(IConsole::IResult *pResult, void *pUserData);
 	static void ConReadyChange7(IConsole::IResult *pResult, void *pUserData);
+
+	// practice mode console commands
+	static void ConPracticeToggle(IConsole::IResult *pResult, void *pUserData);
+	static void ConPracticeReset(IConsole::IResult *pResult, void *pUserData);
+	static void ConPracticeCheckpoint(IConsole::IResult *pResult, void *pUserData);
 
 	static void ConchainLanguageUpdate(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
 	static void ConchainSpecialInfoupdate(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData);
@@ -326,6 +336,29 @@ public:
 	// predicted players
 	CCharacterCore m_PredictedPrevChar;
 	CCharacterCore m_PredictedChar;
+
+	// fake super state - separate simulation for local visual only
+	bool m_FakeSuperActive;
+	CCharacterCore m_FakeSuperCore;     // full physics simulation
+	CCharacterCore m_FakeSuperPrevCore; // previous state for interpolation
+	CWorldCore m_FakeSuperWorld;        // world for physics
+	int m_FakeSuperLastTick;            // last tick we simulated
+
+	// practice mode state - local training simulation
+	bool m_PracticeActive;
+	CCharacterCore m_PracticeCore;      // simulated character
+	CCharacterCore m_PracticePrevCore;  // previous state for interpolation
+	CWorldCore m_PracticeWorld;         // world for physics
+	vec2 m_PracticeSafePos;             // last safe position (not frozen)
+	vec2 m_PracticeStartPos;            // position where practice was enabled
+	vec2 m_PracticeFreezePos;           // position where player got frozen
+	int m_PracticeLastTick;             // last tick we simulated
+	int m_PracticeFreezeStartTick;      // tick when entered freeze (0 = not frozen)
+
+	// practice mode methods
+	void TogglePractice();
+	void ResetPractice();
+	void SetPracticeCheckpoint();
 
 	// snap pointers
 	class CSnapState

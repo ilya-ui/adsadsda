@@ -3,6 +3,7 @@
 #include "player.h"
 
 #include "entities/character.h"
+#include "entities/spider.h"
 #include "gamecontext.h"
 #include "gamecontroller.h"
 #include "score.h"
@@ -28,6 +29,7 @@ CPlayer::CPlayer(CGameContext *pGameServer, uint32_t UniqueClientId, int ClientI
 	dbg_assert(GameServer()->m_pController->IsValidTeam(Team), "Invalid Team: %d", Team);
 	m_Team = Team;
 	m_NumInputs = 0;
+
 	Reset();
 	GameServer()->Antibot()->OnPlayerInit(m_ClientId);
 }
@@ -35,6 +37,15 @@ CPlayer::CPlayer(CGameContext *pGameServer, uint32_t UniqueClientId, int ClientI
 CPlayer::~CPlayer()
 {
 	GameServer()->Antibot()->OnPlayerDestroy(m_ClientId);
+
+	// Clean up spider if player was piloting one
+	if(m_InSpider && m_pSpider)
+	{
+		m_pSpider->Reset();
+		m_pSpider = nullptr;
+		m_InSpider = false;
+	}
+
 	delete m_pLastTarget;
 	delete m_pCharacter;
 	m_pCharacter = nullptr;
@@ -148,6 +159,59 @@ void CPlayer::Reset()
 	m_SwapTargetsClientId = -1;
 	m_BirthdayAnnounced = false;
 	m_RescueMode = RESCUEMODE_AUTO;
+
+	// Telekinesis
+	m_HasTelekinesis = false;
+	m_TelekinesisVictim = -1;
+
+	// Paint mode
+	m_PaintMode = false;
+	m_LastPaintPos = vec2(0, 0);
+
+	// Jail system
+	m_InJail = false;
+	m_JailEndTick = 0;
+
+	// Helicopter system
+	m_InHelicopter = false;
+	m_pHelicopter = nullptr;
+	m_LastF4Press = 0;
+
+	// UFO system
+	m_HasUfo = false;
+	m_InUfo = false;
+	m_pUfo = nullptr;
+	m_UfoVictim = -1;
+
+	// Tank system
+	m_InTank = false;
+	m_pTank = nullptr;
+
+	// Vodka system
+	m_HasVodka = false;
+	m_DrunkLevel = 0;
+	m_LastDrinkTick = 0;
+	m_LastDrunkAction = 0;
+
+	// Cannon system
+	m_HasCannon = false;
+	m_pCannon = nullptr;
+
+	// BigHammer system
+	m_HasBigHammer = false;
+
+	// Spider system
+	m_InSpider = false;
+	m_pSpider = nullptr;
+
+	// Cat ears system
+	m_HasEars = false;
+	for(int i = 0; i < 4; i++)
+		m_EarsIds[i] = -1;
+
+	// Door creation system
+	m_CreatingDoor = false;
+	m_DoorPoint1 = vec2(0, 0);
 
 	m_CameraInfo.Reset();
 }
@@ -748,6 +812,10 @@ void CPlayer::TryRespawn()
 {
 	vec2 SpawnPos;
 
+	// Block respawn during fight event if player was eliminated
+	if(GameServer()->m_FightActive && !GameServer()->m_aFightParticipants[m_ClientId])
+		return;
+
 	if(!GameServer()->m_pController->CanSpawn(m_Team, &SpawnPos, m_ClientId))
 		return;
 
@@ -760,6 +828,16 @@ void CPlayer::TryRespawn()
 
 	if(g_Config.m_SvTeam == SV_TEAM_FORCED_SOLO)
 		m_pCharacter->SetSolo(true);
+
+	// Teleport to jail if player is jailed
+	if(m_InJail && GameServer()->m_JailSet)
+	{
+		m_pCharacter->SetPosition(GameServer()->m_JailPos);
+		m_pCharacter->m_Pos = GameServer()->m_JailPos;
+		m_pCharacter->m_PrevPos = GameServer()->m_JailPos;
+		m_pCharacter->ResetVelocity();
+		m_pCharacter->Freeze();
+	}
 }
 
 void CPlayer::UpdatePlaytime()

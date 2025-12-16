@@ -2,9 +2,18 @@
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include "character.h"
 
+#include "ferriswheel.h"
+#include "helicopter.h"
 #include "laser.h"
+#include "paintlaser.h"
 #include "pickup.h"
 #include "projectile.h"
+#include "spider.h"
+#include "tank.h"
+#include "turret.h"
+#include "ufo.h"
+#include "laserdoor.h"
+#include "lasertetris.h"
 
 #include <antibot/antibot_data.h>
 
@@ -20,6 +29,7 @@
 #include <game/server/gamecontext.h>
 #include <game/server/gamecontroller.h>
 #include <game/server/player.h>
+#include <game/server/zombieevent.h>
 #include <game/server/score.h>
 #include <game/server/teams.h>
 #include <game/team_state.h>
@@ -287,6 +297,14 @@ void CCharacter::HandleNinja()
 	if(m_Core.m_ActiveWeapon != WEAPON_NINJA)
 		return;
 
+	// Telekinesis mode: infinite ninja duration
+	if(m_pPlayer->m_HasTelekinesis)
+	{
+		// Reset activation tick to keep ninja active forever
+		m_Core.m_Ninja.m_ActivationTick = Server()->Tick();
+		return;
+	}
+
 	if((Server()->Tick() - m_Core.m_Ninja.m_ActivationTick) > (g_pData->m_Weapons.m_Ninja.m_Duration * Server()->TickSpeed() / 1000))
 	{
 		// time's up, return
@@ -385,7 +403,10 @@ void CCharacter::HandleNinja()
 void CCharacter::DoWeaponSwitch()
 {
 	// make sure we can switch
-	if(m_ReloadTimer != 0 || m_QueuedWeapon == -1 || m_Core.m_aWeapons[WEAPON_NINJA].m_Got || !m_Core.m_aWeapons[m_QueuedWeapon].m_Got)
+	// Allow weapon switch if player has telekinesis (even with ninja)
+	bool HasNinja = m_Core.m_aWeapons[WEAPON_NINJA].m_Got;
+	bool CanSwitchWithTelekinesis = m_pPlayer->m_HasTelekinesis && HasNinja;
+	if(m_ReloadTimer != 0 || m_QueuedWeapon == -1 || (HasNinja && !CanSwitchWithTelekinesis) || !m_Core.m_aWeapons[m_QueuedWeapon].m_Got)
 		return;
 
 	// switch Weapon
@@ -435,6 +456,13 @@ void CCharacter::HandleWeaponSwitch()
 	// check for insane values
 	if(WantedWeapon >= 0 && WantedWeapon < NUM_WEAPONS && WantedWeapon != m_Core.m_ActiveWeapon && m_Core.m_aWeapons[WantedWeapon].m_Got)
 		m_QueuedWeapon = WantedWeapon;
+
+	// Zombie event: cycle structure selection on weapon switch
+	if(GameServer()->m_ZombieEvent.IsActive() && GameServer()->m_ZombieEvent.IsBuilder(m_pPlayer->GetCid()))
+	{
+		if(WantedWeapon != m_Core.m_ActiveWeapon)
+			GameServer()->m_ZombieEvent.CycleStructure(m_pPlayer->GetCid());
+	}
 
 	DoWeaponSwitch();
 }
@@ -504,6 +532,140 @@ void CCharacter::FireWeapon()
 
 		Antibot()->OnHammerFire(m_pPlayer->GetCid());
 
+		// Check for vehicle entry/exit with hammer
+		vec2 HammerPos = m_Pos + Direction * GetProximityRadius() * 0.75f;
+		
+		// Check ferris wheel
+		CEntity *pEnt = GameServer()->m_World.FindFirst(CGameWorld::ENTTYPE_PICKUP);
+		while(pEnt)
+		{
+			CFerrisWheel *pWheel = dynamic_cast<CFerrisWheel *>(pEnt);
+			if(pWheel && pWheel->TryEnterSeat(m_pPlayer->GetCid(), HammerPos))
+				break;
+			pEnt = pEnt->TypeNext();
+		}
+		
+		// Check helicopter entry
+		CEntity *pHeli = GameServer()->m_World.FindFirst(CGameWorld::ENTTYPE_HELICOPTER);
+		while(pHeli)
+		{
+			CHelicopter *pHelicopter = static_cast<CHelicopter *>(pHeli);
+			if(distance(HammerPos, pHelicopter->GetPos()) < 80.0f)
+			{
+				if(m_pPlayer->m_InHelicopter && m_pPlayer->m_pHelicopter == pHelicopter)
+				{
+					pHelicopter->RemovePilot();
+					GameServer()->SendChatTarget(m_pPlayer->GetCid(), "Exited helicopter!");
+				}
+				else if(pHelicopter->GetPilot() < 0)
+				{
+					pHelicopter->SetPilot(m_pPlayer->GetCid());
+					GameServer()->SendChatTarget(m_pPlayer->GetCid(), "Entered helicopter! Move cursor to fly.");
+				}
+				break;
+			}
+			pHeli = pHeli->TypeNext();
+		}
+		
+		// Check UFO entry
+		CEntity *pUfoEnt = GameServer()->m_World.FindFirst(CGameWorld::ENTTYPE_UFO);
+		while(pUfoEnt)
+		{
+			CUfo *pUfo = static_cast<CUfo *>(pUfoEnt);
+			if(distance(HammerPos, pUfo->GetPos()) < 80.0f)
+			{
+				if(m_pPlayer->m_InUfo && m_pPlayer->m_pUfo == pUfo)
+				{
+					pUfo->RemovePilot();
+					GameServer()->SendChatTarget(m_pPlayer->GetCid(), "Exited UFO!");
+				}
+				else if(pUfo->GetPilot() < 0)
+				{
+					pUfo->SetPilot(m_pPlayer->GetCid());
+					GameServer()->SendChatTarget(m_pPlayer->GetCid(), "Entered UFO! Move cursor to fly, LMB to abduct.");
+				}
+				break;
+			}
+			pUfoEnt = pUfoEnt->TypeNext();
+		}
+		
+		// Check tank entry
+		CEntity *pTankEnt = GameServer()->m_World.FindFirst(CGameWorld::ENTTYPE_TANK);
+		while(pTankEnt)
+		{
+			CTank *pTank = static_cast<CTank *>(pTankEnt);
+			if(distance(HammerPos, pTank->GetPos()) < 100.0f)
+			{
+				if(m_pPlayer->m_InTank && m_pPlayer->m_pTank == pTank)
+				{
+					pTank->RemovePilot();
+					GameServer()->SendChatTarget(m_pPlayer->GetCid(), "Exited tank!");
+				}
+				else if(pTank->GetPilot() < 0)
+				{
+					pTank->SetPilot(m_pPlayer->GetCid());
+					GameServer()->SendChatTarget(m_pPlayer->GetCid(), "Entered tank! A/D to move, aim with cursor, LMB to fire.");
+				}
+				break;
+			}
+			pTankEnt = pTankEnt->TypeNext();
+		}
+
+		// Check spider entry
+		CEntity *pSpiderEnt = GameServer()->m_World.FindFirst(CGameWorld::ENTTYPE_SPIDER);
+		while(pSpiderEnt)
+		{
+			CSpider *pSpider = static_cast<CSpider *>(pSpiderEnt);
+			if(distance(HammerPos, pSpider->GetPos()) < 80.0f)
+			{
+				if(m_pPlayer->m_InSpider && m_pPlayer->m_pSpider == pSpider)
+				{
+					pSpider->RemovePilot();
+					GameServer()->SendChatTarget(m_pPlayer->GetCid(), "Exited spider!");
+				}
+				else if(pSpider->GetPilot() < 0)
+				{
+					pSpider->SetPilot(m_pPlayer->GetCid());
+					GameServer()->SendChatTarget(m_pPlayer->GetCid(), "Entered spider! A/D to move, Space to jump, LMB to fire.");
+				}
+				break;
+			}
+			pSpiderEnt = pSpiderEnt->TypeNext();
+		}
+
+		// Check turret entry
+		CEntity *pTurretEnt = GameServer()->m_World.FindFirst(CGameWorld::ENTTYPE_LASER);
+		while(pTurretEnt)
+		{
+			CTurret *pTurret = dynamic_cast<CTurret *>(pTurretEnt);
+			if(pTurret && distance(HammerPos, pTurret->GetPos()) < 60.0f)
+			{
+				pTurret->OnHammerHit(m_pPlayer->GetCid());
+				break;
+			}
+			pTurretEnt = pTurretEnt->TypeNext();
+		}
+
+		// Check tetris interaction
+		CEntity *pTetrisEnt = GameServer()->m_World.FindFirst(CGameWorld::ENTTYPE_LASER);
+		while(pTetrisEnt)
+		{
+			CLaserTetris *pTetris = dynamic_cast<CLaserTetris *>(pTetrisEnt);
+			if(pTetris && distance(HammerPos, pTetris->GetPos()) < 200.0f)
+			{
+				pTetris->OnHammerHit(m_pPlayer->GetCid());
+				break;
+			}
+			pTetrisEnt = pTetrisEnt->TypeNext();
+		}
+
+		// Zombie event: place structure with hammer
+		if(GameServer()->m_ZombieEvent.IsActive() && GameServer()->m_ZombieEvent.IsBuilder(m_pPlayer->GetCid()))
+		{
+			vec2 CursorPos = m_Pos + vec2(m_Core.m_Input.m_TargetX, m_Core.m_Input.m_TargetY);
+			GameServer()->m_ZombieEvent.TryPlaceStructure(m_pPlayer->GetCid(), CursorPos);
+		}
+
 		if(m_Core.m_HammerHitDisabled)
 			break;
 
@@ -550,6 +712,49 @@ void CCharacter::FireWeapon()
 		{
 			float FireDelay = GetTuning(m_TuneZone)->m_HammerHitFireDelay;
 			m_ReloadTimer = FireDelay * Server()->TickSpeed() / 1000;
+		}
+
+		// Check for laser doors to toggle
+		CEntity *pDoorEnt = GameWorld()->FindFirst(CGameWorld::ENTTYPE_LASER);
+		while(pDoorEnt)
+		{
+			CLaserDoor *pDoor = dynamic_cast<CLaserDoor *>(pDoorEnt);
+			if(pDoor && distance(m_Pos, pDoor->GetPos()) < 100.0f)
+			{
+				pDoor->Toggle(m_pPlayer->GetCid());
+				break;
+			}
+			pDoorEnt = pDoorEnt->TypeNext();
+		}
+
+		// BigHammer effect - create ONE giant laser hammer that hits HARD
+		if(m_pPlayer->m_HasBigHammer)
+		{
+			const float BigHammerLength = 400.0f; // Огромный лазер
+			const float BigHammerRadius = 300.0f; // Радиус поражения
+
+			// Создаём один огромный лазер в направлении удара
+			new CLaser(GameWorld(), m_Pos, Direction, BigHammerLength, m_pPlayer->GetCid(), WEAPON_LASER);
+
+			// Мощный knockback всем в радиусе
+			CEntity *apBigEnts[MAX_CLIENTS];
+			int BigNum = GameServer()->m_World.FindEntities(m_Pos + Direction * 200.0f, BigHammerRadius, apBigEnts, MAX_CLIENTS, CGameWorld::ENTTYPE_CHARACTER);
+
+			for(int i = 0; i < BigNum; ++i)
+			{
+				auto *pTarget = static_cast<CCharacter *>(apBigEnts[i]);
+				if(pTarget == this)
+					continue;
+				if(!pTarget->IsAlive() || !CanCollide(pTarget->GetPlayer()->GetCid()))
+					continue;
+
+				// ОЧЕНЬ сильный удар
+				float Strength = GetTuning(m_TuneZone)->m_HammerStrength * 5.0f;
+				pTarget->TakeDamage(Direction * Strength, 0, m_pPlayer->GetCid(), WEAPON_HAMMER);
+				pTarget->UnFreeze();
+				GameServer()->CreateHammerHit(pTarget->m_Pos, TeamMask());
+				GameServer()->CreateSound(pTarget->m_Pos, SOUND_NINJA_HIT, TeamMask());
+			}
 		}
 	}
 	break;
@@ -619,6 +824,46 @@ void CCharacter::FireWeapon()
 
 	case WEAPON_NINJA:
 	{
+		// Telekinesis mode
+		if(m_pPlayer->m_HasTelekinesis)
+		{
+			// If already grabbing someone, release them
+			if(m_pPlayer->m_TelekinesisVictim >= 0)
+			{
+				CPlayer *pVictimPlayer = GameServer()->m_apPlayers[m_pPlayer->m_TelekinesisVictim];
+				if(pVictimPlayer && pVictimPlayer->GetCharacter())
+				{
+					pVictimPlayer->GetCharacter()->UnFreeze();
+				}
+				m_pPlayer->m_TelekinesisVictim = -1;
+				GameServer()->CreateSound(m_Pos, SOUND_NINJA_HIT, TeamMask());
+			}
+			else
+			{
+				// Try to grab a player at cursor position
+				vec2 CursorWorldPos = m_Pos + MouseTarget;
+				CEntity *apEnts[MAX_CLIENTS];
+				int Num = GameServer()->m_World.FindEntities(CursorWorldPos, 50.0f, apEnts, MAX_CLIENTS, CGameWorld::ENTTYPE_CHARACTER);
+
+				for(int i = 0; i < Num; ++i)
+				{
+					auto *pTarget = static_cast<CCharacter *>(apEnts[i]);
+					if(pTarget == this)
+						continue;
+					if(!pTarget->IsAlive())
+						continue;
+
+					// Grab this player
+					m_pPlayer->m_TelekinesisVictim = pTarget->GetPlayer()->GetCid();
+					pTarget->Freeze();
+					GameServer()->CreateSound(m_Pos, SOUND_NINJA_FIRE, TeamMask());
+					break;
+				}
+			}
+			break;
+		}
+
+		// Normal ninja behavior
 		// reset Hit objects
 		m_NumObjectsHit = 0;
 
@@ -822,6 +1067,113 @@ void CCharacter::Tick()
 		Antibot()->OnHookAttach(m_pPlayer->GetCid(), false);
 	}
 
+	// Telekinesis: move grabbed player to cursor position
+	if(m_pPlayer->m_HasTelekinesis && m_pPlayer->m_TelekinesisVictim >= 0)
+	{
+		CPlayer *pVictimPlayer = GameServer()->m_apPlayers[m_pPlayer->m_TelekinesisVictim];
+		if(pVictimPlayer && pVictimPlayer->GetCharacter() && pVictimPlayer->GetCharacter()->IsAlive())
+		{
+			CCharacter *pVictim = pVictimPlayer->GetCharacter();
+			vec2 CursorWorldPos = m_Pos + vec2(m_LatestInput.m_TargetX, m_LatestInput.m_TargetY);
+			pVictim->SetPosition(CursorWorldPos);
+			pVictim->ResetVelocity();
+			pVictim->Freeze(); // Keep frozen
+		}
+		else
+		{
+			// Victim disconnected or died
+			m_pPlayer->m_TelekinesisVictim = -1;
+		}
+	}
+
+	// Paint mode: draw lasers when holding fire
+	if(m_pPlayer->m_PaintMode && (m_LatestInput.m_Fire & 1))
+	{
+		vec2 CursorWorldPos = m_Pos + vec2(m_LatestInput.m_TargetX, m_LatestInput.m_TargetY);
+		vec2 LastPos = m_pPlayer->m_LastPaintPos;
+
+		// Only draw if we moved enough
+		if(distance(CursorWorldPos, LastPos) > 5.0f || LastPos == vec2(0, 0))
+		{
+			// Create a persistent paint laser from last position to current position
+			if(LastPos != vec2(0, 0))
+			{
+				new CPaintLaser(GameWorld(), LastPos, CursorWorldPos, m_pPlayer->GetCid());
+			}
+			m_pPlayer->m_LastPaintPos = CursorWorldPos;
+		}
+	}
+	else if(m_pPlayer->m_PaintMode)
+	{
+		// Reset last position when not drawing
+		m_pPlayer->m_LastPaintPos = vec2(0, 0);
+	}
+
+	// Vodka system: drinking and drunk effects
+	if(m_pPlayer->m_HasVodka)
+	{
+		// Drinking on LMB (only when not frozen) - one drink per bottle
+		if(!m_FreezeTime && (m_LatestInput.m_Fire & 1) && Server()->Tick() > m_pPlayer->m_LastDrinkTick + Server()->TickSpeed() / 2)
+		{
+			m_pPlayer->m_LastDrinkTick = Server()->Tick();
+			m_pPlayer->m_DrunkLevel += 15;
+			if(m_pPlayer->m_DrunkLevel > 100)
+				m_pPlayer->m_DrunkLevel = 100;
+
+			// Bottle is empty after one drink
+			m_pPlayer->m_HasVodka = false;
+
+			char aBuf[64];
+			str_format(aBuf, sizeof(aBuf), "*drinks vodka* Drunk level: %d%%", m_pPlayer->m_DrunkLevel);
+			GameServer()->SendChatTarget(m_pPlayer->GetCid(), aBuf);
+
+			// Show heart emoticon when drinking
+			GameServer()->SendEmoticon(m_pPlayer->GetCid(), EMOTICON_HEARTS, -1);
+		}
+	}
+
+	// Drunk effects based on level (only when not frozen)
+	if(!m_FreezeTime && m_pPlayer->m_DrunkLevel > 0 && Server()->Tick() > m_pPlayer->m_LastDrunkAction + Server()->TickSpeed() / 2)
+	{
+		int Chance = rand() % 100;
+		if(Chance < m_pPlayer->m_DrunkLevel / 2)
+		{
+			m_pPlayer->m_LastDrunkAction = Server()->Tick();
+			int Action = rand() % 5;
+
+			switch(Action)
+			{
+			case 0: // Random movement
+				m_Core.m_Vel.x += (rand() % 20 - 10) * (m_pPlayer->m_DrunkLevel / 20.0f);
+				break;
+			case 1: // Random jump
+				if(IsGrounded())
+					m_Core.m_Vel.y = -10.0f;
+				break;
+			case 2: // Random emoticon
+			{
+				int Emoticons[] = {EMOTICON_OOP, EMOTICON_EXCLAMATION, EMOTICON_HEARTS, EMOTICON_DROP, EMOTICON_DOTDOT, EMOTICON_MUSIC, EMOTICON_SORRY, EMOTICON_GHOST, EMOTICON_SUSHI, EMOTICON_SPLATTEE};
+				GameServer()->SendEmoticon(m_pPlayer->GetCid(), Emoticons[rand() % 10], -1);
+				break;
+			}
+			case 3: // Stumble
+				m_Core.m_Vel.x += (rand() % 2 == 0 ? 5 : -5) * (m_pPlayer->m_DrunkLevel / 25.0f);
+				break;
+			case 4: // Hiccup sound
+				GameServer()->CreateSound(m_Pos, SOUND_PLAYER_PAIN_SHORT);
+				break;
+			}
+		}
+
+		// Slowly sober up
+		if(rand() % 100 < 5)
+		{
+			m_pPlayer->m_DrunkLevel--;
+			if(m_pPlayer->m_DrunkLevel < 0)
+				m_pPlayer->m_DrunkLevel = 0;
+		}
+	}
+
 	// handle Weapons
 	HandleWeapons();
 
@@ -833,6 +1185,27 @@ void CCharacter::Tick()
 		if(HookedPlayer != -1 && GameServer()->m_apPlayers[HookedPlayer]->GetTeam() != TEAM_SPECTATORS)
 		{
 			Antibot()->OnHookAttach(m_pPlayer->GetCid(), true);
+		}
+	}
+
+	// Zombie event: check for infection (zombie touching builder)
+	if(GameServer()->m_ZombieEvent.IsActive() && 
+	   GameServer()->m_ZombieEvent.GetPhase() == CZombieEvent::PHASE_ATTACK &&
+	   GameServer()->m_ZombieEvent.IsZombie(m_pPlayer->GetCid()))
+	{
+		// Check collision with builders
+		for(int i = 0; i < MAX_CLIENTS; i++)
+		{
+			if(i == m_pPlayer->GetCid())
+				continue;
+			if(!GameServer()->m_ZombieEvent.IsBuilder(i))
+				continue;
+			
+			CCharacter *pBuilder = GameServer()->GetPlayerChar(i);
+			if(pBuilder && distance(m_Pos, pBuilder->GetPos()) < 50.0f)
+			{
+				GameServer()->m_ZombieEvent.InfectBuilder(i);
+			}
 		}
 	}
 
@@ -1341,6 +1714,76 @@ void CCharacter::Snap(int SnappingClient)
 
 	// OVERRIDE_NONE is the default value, SnapNewItem zeroes the object, so it would incorrectly become 0
 	pDDNetCharacter->m_TuneZoneOverride = TuneZone::OVERRIDE_NONE;
+
+	// Draw cat ears (M shape) if player has them
+	if(m_pPlayer->m_HasEars)
+	{
+		int StartTick = Server()->Tick() - 2;
+
+		// Allocate IDs if not done yet
+		for(int i = 0; i < 4; i++)
+		{
+			if(m_pPlayer->m_EarsIds[i] < 0)
+				m_pPlayer->m_EarsIds[i] = Server()->SnapNewId();
+		}
+
+		// Cat ears - two triangles forming M shape (bigger and wider)
+		// Left ear triangle: outer edge, tip, inner edge
+		vec2 LeftOuter = m_Pos + vec2(-18, -22);   // outer base
+		vec2 LeftTip = m_Pos + vec2(-12, -42);     // tip pointing up (higher)
+		vec2 LeftInner = m_Pos + vec2(-4, -24);    // inner base
+
+		// Right ear triangle
+		vec2 RightOuter = m_Pos + vec2(18, -22);   // outer base
+		vec2 RightTip = m_Pos + vec2(12, -42);     // tip pointing up (higher)
+		vec2 RightInner = m_Pos + vec2(4, -24);    // inner base
+
+		CNetObj_Laser *pObj;
+
+		// Left ear: outer to tip
+		pObj = Server()->SnapNewItem<CNetObj_Laser>(m_pPlayer->m_EarsIds[0]);
+		if(pObj)
+		{
+			pObj->m_X = (int)LeftTip.x;
+			pObj->m_Y = (int)LeftTip.y;
+			pObj->m_FromX = (int)LeftOuter.x;
+			pObj->m_FromY = (int)LeftOuter.y;
+			pObj->m_StartTick = StartTick;
+		}
+
+		// Left ear: tip to inner
+		pObj = Server()->SnapNewItem<CNetObj_Laser>(m_pPlayer->m_EarsIds[1]);
+		if(pObj)
+		{
+			pObj->m_X = (int)LeftInner.x;
+			pObj->m_Y = (int)LeftInner.y;
+			pObj->m_FromX = (int)LeftTip.x;
+			pObj->m_FromY = (int)LeftTip.y;
+			pObj->m_StartTick = StartTick;
+		}
+
+		// Right ear: outer to tip
+		pObj = Server()->SnapNewItem<CNetObj_Laser>(m_pPlayer->m_EarsIds[2]);
+		if(pObj)
+		{
+			pObj->m_X = (int)RightTip.x;
+			pObj->m_Y = (int)RightTip.y;
+			pObj->m_FromX = (int)RightOuter.x;
+			pObj->m_FromY = (int)RightOuter.y;
+			pObj->m_StartTick = StartTick;
+		}
+
+		// Right ear: tip to inner
+		pObj = Server()->SnapNewItem<CNetObj_Laser>(m_pPlayer->m_EarsIds[3]);
+		if(pObj)
+		{
+			pObj->m_X = (int)RightInner.x;
+			pObj->m_Y = (int)RightInner.y;
+			pObj->m_FromX = (int)RightTip.x;
+			pObj->m_FromY = (int)RightTip.y;
+			pObj->m_StartTick = StartTick;
+		}
+	}
 }
 
 void CCharacter::PostGlobalSnap()

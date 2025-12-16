@@ -260,6 +260,8 @@ int CControls::SnapInput(int *pData)
 		if(!m_aInputDirectionLeft[g_Config.m_ClDummy] && m_aInputDirectionRight[g_Config.m_ClDummy])
 			m_aInputData[g_Config.m_ClDummy].m_Direction = 1;
 
+
+
 		// dummy copy moves
 		if(g_Config.m_ClDummyCopyMoves)
 		{
@@ -335,6 +337,7 @@ int CControls::SnapInput(int *pData)
 
 	m_LastSendTime = time_get();
 	mem_copy(pData, &m_aInputData[g_Config.m_ClDummy], sizeof(m_aInputData[0]));
+
 	return sizeof(m_aInputData[0]);
 }
 

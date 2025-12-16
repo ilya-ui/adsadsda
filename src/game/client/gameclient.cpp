@@ -118,6 +118,7 @@ void CGameClient::OnConsoleInit()
 					      &m_Skins7,
 					      &m_CountryFlags,
 					      &m_MapImages,
+					      &m_MapTravel,
 					      &m_Effects, // doesn't render anything, just updates effects
 					      &m_Binds,
 					      &m_Binds.m_SpecialBinds,
@@ -159,7 +160,8 @@ void CGameClient::OnConsoleInit()
 					      &m_Tooltips,
 					      &m_KeyBinder,
 					      &m_GameConsole,
-					      &m_MenuBackground});
+					      &m_MenuBackground,
+					      &m_ScreenDrawing});
 
 	// build the input stack
 	m_vpInput.insert(m_vpInput.end(), {&m_KeyBinder, // this will take over all input when we want to bind a key
@@ -168,10 +170,12 @@ void CGameClient::OnConsoleInit()
 						  &m_Chat, // chat has higher prio, due to that you can quit it by pressing esc
 						  &m_Scoreboard,
 						  &m_Motd, // for pressing esc to remove it
+						  &m_MapTravel,
 						  &m_Spectator,
 						  &m_Emoticon,
 						  &m_ImportantAlert,
 						  &m_Menus,
+						  &m_ScreenDrawing,
 						  &m_Controls,
 						  &m_TouchControls,
 						  &m_Binds});
@@ -188,6 +192,11 @@ void CGameClient::OnConsoleInit()
 	Console()->Register("team", "i[team-id]", CFGFLAG_CLIENT, ConTeam, this, "Switch team");
 	Console()->Register("kill", "", CFGFLAG_CLIENT, ConKill, this, "Kill yourself to restart");
 	Console()->Register("ready_change", "", CFGFLAG_CLIENT, ConReadyChange7, this, "Change ready state (0.7 only)");
+
+	// practice mode commands
+	Console()->Register("practice_toggle", "", CFGFLAG_CLIENT, ConPracticeToggle, this, "Toggle practice mode");
+	Console()->Register("practice_reset", "", CFGFLAG_CLIENT, ConPracticeReset, this, "Reset to safe position");
+	Console()->Register("practice_checkpoint", "", CFGFLAG_CLIENT, ConPracticeCheckpoint, this, "Set checkpoint at current position");
 
 	// register game commands to allow the client prediction to load settings from the map
 	Console()->Register("tune", "s[tuning] ?f[value]", CFGFLAG_GAME, ConTuneParam, this, "Tune variable to value");
@@ -524,6 +533,23 @@ int CGameClient::OnSnapInput(int *pData, bool Dummy, bool Force)
 {
 	if(!Dummy)
 	{
+		// fake super: process input locally but send minimal to server
+		if(g_Config.m_ClFakeSuper && m_FakeSuperActive)
+		{
+			// still process input to update m_aInputData for local simulation
+			int Size = m_Controls.SnapInput(pData);
+			// copy the processed input
+			CNetObj_PlayerInput *pInput = (CNetObj_PlayerInput *)pData;
+			// keep weapon change and player flags (for emotes), but remove movement
+			CNetObj_PlayerInput MinimalInput = {};
+			MinimalInput.m_PlayerFlags = pInput->m_PlayerFlags;
+			MinimalInput.m_WantedWeapon = pInput->m_WantedWeapon;
+			MinimalInput.m_NextWeapon = pInput->m_NextWeapon;
+			MinimalInput.m_PrevWeapon = pInput->m_PrevWeapon;
+			mem_copy(pData, &MinimalInput, sizeof(MinimalInput));
+			return Size;
+		}
+
 		return m_Controls.SnapInput(pData);
 	}
 	if(m_aLocalIds[!g_Config.m_ClDummy] < 0)
@@ -653,6 +679,21 @@ void CGameClient::OnReset()
 	m_PredictedPrevChar.Reset();
 	m_PredictedChar.Reset();
 
+	// fake super state
+	m_FakeSuperActive = false;
+	m_FakeSuperCore.Reset();
+	m_FakeSuperPrevCore.Reset();
+	m_FakeSuperLastTick = 0;
+
+	// practice mode state
+	m_PracticeActive = false;
+	m_PracticeCore.Reset();
+	m_PracticePrevCore.Reset();
+	m_PracticeSafePos = vec2(0.0f, 0.0f);
+	m_PracticeStartPos = vec2(0.0f, 0.0f);
+	m_PracticeLastTick = 0;
+	m_PracticeFreezeStartTick = 0;
+
 	// m_Snap was cleared in InvalidateSnapshot
 
 	std::fill(std::begin(m_aLocalTuneZone), std::end(m_aLocalTuneZone), -1);
@@ -721,8 +762,13 @@ void CGameClient::OnReset()
 
 void CGameClient::UpdatePositions()
 {
+	// fake super: use separate simulated position for local rendering
+	if(m_FakeSuperActive && m_Snap.m_pLocalCharacter)
+	{
+		m_LocalCharacterPos = mix(m_FakeSuperPrevCore.m_Pos, m_FakeSuperCore.m_Pos, Client()->IntraGameTick(g_Config.m_ClDummy));
+	}
 	// local character position
-	if(g_Config.m_ClPredict && Client()->State() != IClient::STATE_DEMOPLAYBACK)
+	else if(g_Config.m_ClPredict && Client()->State() != IClient::STATE_DEMOPLAYBACK)
 	{
 		if(!AntiPingPlayers())
 		{
@@ -2379,6 +2425,34 @@ void CGameClient::OnPredict()
 	if(m_Snap.m_LocalClientId == -1 || !m_Snap.m_aCharacters[m_Snap.m_LocalClientId].m_Active)
 		return;
 
+	// fake super: manage separate local simulation
+	if(g_Config.m_ClFakeSuper && !m_FakeSuperActive)
+	{
+		// just enabled - initialize fake core from current predicted state
+		m_FakeSuperCore = m_PredictedChar;
+		m_FakeSuperCore.Init(&m_FakeSuperWorld, Collision(), &m_Teams);
+		m_FakeSuperCore.m_Tuning = m_aTuning[g_Config.m_ClDummy];
+		m_FakeSuperCore.m_Super = true; // enable super mode to ignore freeze
+		m_FakeSuperCore.m_EndlessJump = true; // infinite jumps
+		m_FakeSuperCore.m_Id = m_Snap.m_LocalClientId;
+		// give all weapons
+		for(int i = 0; i < NUM_WEAPONS; i++)
+		{
+			m_FakeSuperCore.m_aWeapons[i].m_Got = true;
+			m_FakeSuperCore.m_aWeapons[i].m_Ammo = -1;
+		}
+		m_FakeSuperWorld.m_apCharacters[m_Snap.m_LocalClientId] = &m_FakeSuperCore;
+		m_FakeSuperPrevCore = m_FakeSuperCore;
+		m_FakeSuperLastTick = Client()->GameTick(g_Config.m_ClDummy);
+		m_FakeSuperActive = true;
+	}
+	else if(!g_Config.m_ClFakeSuper && m_FakeSuperActive)
+	{
+		// just disabled - clear world
+		m_FakeSuperWorld.m_apCharacters[m_Snap.m_LocalClientId] = nullptr;
+		m_FakeSuperActive = false;
+	}
+
 	// don't predict anything if we are paused
 	if(m_Snap.m_pGameInfoObj && m_Snap.m_pGameInfoObj->m_GameStateFlags & GAMESTATEFLAG_PAUSED)
 	{
@@ -2683,6 +2757,76 @@ void CGameClient::OnPredict()
 
 	if(m_NewPredictedTick)
 		m_Ghost.OnNewPredictedSnapshot();
+
+	// fake super: simulate local movement independently from server using real physics
+	if(m_FakeSuperActive && m_Snap.m_pLocalCharacter)
+	{
+		int CurrentTick = Client()->GameTick(g_Config.m_ClDummy);
+
+		// simulate all ticks since last simulation
+		while(m_FakeSuperLastTick < CurrentTick)
+		{
+			m_FakeSuperLastTick++;
+
+			// save previous state for interpolation
+			m_FakeSuperPrevCore = m_FakeSuperCore;
+
+			// get current input from controls
+			CNetObj_PlayerInput Input = m_Controls.m_aInputData[g_Config.m_ClDummy];
+
+			// apply input and tick physics
+			m_FakeSuperCore.m_Input = Input;
+			m_FakeSuperCore.Tick(true, true);
+			m_FakeSuperCore.Move();
+			m_FakeSuperCore.Quantize();
+		}
+	}
+
+	// practice mode: simulate local movement with freeze detection
+	if(m_PracticeActive && m_Snap.m_pLocalCharacter)
+	{
+		int CurrentTick = Client()->GameTick(g_Config.m_ClDummy);
+
+		// simulate all ticks since last simulation
+		while(m_PracticeLastTick < CurrentTick)
+		{
+			m_PracticeLastTick++;
+
+			// save previous state for interpolation
+			m_PracticePrevCore = m_PracticeCore;
+
+			// get current input from controls
+			CNetObj_PlayerInput Input = m_Controls.m_aInputData[g_Config.m_ClDummy];
+
+			// apply input and tick physics
+			m_PracticeCore.m_Input = Input;
+			m_PracticeCore.Tick(true, true);
+			m_PracticeCore.Move();
+			m_PracticeCore.Quantize();
+
+			// check for freeze tiles (only TILE_FREEZE and TILE_DFREEZE)
+			int TileIndex = Collision()->GetTileIndex(Collision()->GetMapIndex(m_PracticeCore.m_Pos));
+			bool IsFreezeZone = (TileIndex == TILE_FREEZE || TileIndex == TILE_DFREEZE);
+
+			if(IsFreezeZone)
+			{
+				// instant teleport to safe position
+				m_PracticeCore.m_Pos = m_PracticeSafePos;
+				m_PracticeCore.m_Vel = vec2(0.0f, 0.0f);
+				m_PracticePrevCore.m_Pos = m_PracticeSafePos;
+				m_PracticePrevCore.m_Vel = vec2(0.0f, 0.0f);
+			}
+			else
+			{
+				// update safe position only when grounded (touching solid ground)
+				vec2 CheckPos = m_PracticeCore.m_Pos + vec2(0.0f, 28.0f / 2.0f + 5.0f);
+				if(Collision()->CheckPoint(CheckPos))
+				{
+					m_PracticeSafePos = m_PracticeCore.m_Pos;
+				}
+			}
+		}
+	}
 }
 
 void CGameClient::OnActivateEditor()
@@ -3143,6 +3287,81 @@ void CGameClient::ConReadyChange7(IConsole::IResult *pResult, void *pUserData)
 	CGameClient *pClient = static_cast<CGameClient *>(pUserData);
 	if(pClient->Client()->State() == IClient::STATE_ONLINE)
 		pClient->SendReadyChange7();
+}
+
+void CGameClient::ConPracticeToggle(IConsole::IResult *pResult, void *pUserData)
+{
+	((CGameClient *)pUserData)->TogglePractice();
+}
+
+void CGameClient::ConPracticeReset(IConsole::IResult *pResult, void *pUserData)
+{
+	((CGameClient *)pUserData)->ResetPractice();
+}
+
+void CGameClient::ConPracticeCheckpoint(IConsole::IResult *pResult, void *pUserData)
+{
+	((CGameClient *)pUserData)->SetPracticeCheckpoint();
+}
+
+void CGameClient::TogglePractice()
+{
+	if(Client()->State() != IClient::STATE_ONLINE)
+		return;
+
+	if(!m_Snap.m_pLocalCharacter)
+		return;
+
+	if(!m_PracticeActive)
+	{
+		// Enable practice mode
+		m_PracticeCore = m_PredictedChar;
+		m_PracticeCore.Init(&m_PracticeWorld, Collision(), &m_Teams);
+		m_PracticeCore.m_Tuning = m_aTuning[g_Config.m_ClDummy];
+		m_PracticeCore.m_Id = m_Snap.m_LocalClientId;
+
+		m_PracticeWorld.m_apCharacters[m_Snap.m_LocalClientId] = &m_PracticeCore;
+		m_PracticePrevCore = m_PracticeCore;
+
+		m_PracticeSafePos = m_PracticeCore.m_Pos;
+		m_PracticeStartPos = m_PracticeCore.m_Pos;
+		m_PracticeLastTick = Client()->GameTick(g_Config.m_ClDummy);
+		m_PracticeActive = true;
+
+		m_Chat.AddLine(-2, 0, "Practice mode enabled");
+	}
+	else
+	{
+		// Disable practice mode
+		m_PracticeActive = false;
+		m_PracticeCore.Reset();
+		m_PracticePrevCore.Reset();
+		m_PracticeWorld.m_apCharacters[m_Snap.m_LocalClientId] = nullptr;
+
+		m_Chat.AddLine(-2, 0, "Practice mode disabled");
+	}
+}
+
+void CGameClient::ResetPractice()
+{
+	if(!m_PracticeActive)
+		return;
+
+	m_PracticeCore.m_Pos = m_PracticeSafePos;
+	m_PracticeCore.m_Vel = vec2(0.0f, 0.0f);
+	m_PracticePrevCore.m_Pos = m_PracticeSafePos;
+	m_PracticePrevCore.m_Vel = vec2(0.0f, 0.0f);
+
+	m_Chat.AddLine(-2, 0, "Reset to safe position");
+}
+
+void CGameClient::SetPracticeCheckpoint()
+{
+	if(!m_PracticeActive)
+		return;
+
+	m_PracticeSafePos = m_PracticeCore.m_Pos;
+	m_Chat.AddLine(-2, 0, "Checkpoint saved");
 }
 
 void CGameClient::ConchainLanguageUpdate(IConsole::IResult *pResult, void *pUserData, IConsole::FCommandCallback pfnCallback, void *pCallbackUserData)
@@ -3635,7 +3854,32 @@ void CGameClient::UpdateRenderedCharacters()
 		}
 		m_aClients[i].m_RenderPos = Pos;
 		if(Predict() && i == m_Snap.m_LocalClientId)
-			m_LocalCharacterPos = Pos;
+		{
+			// fake super: override render data with fake simulated state
+			if(m_FakeSuperActive)
+			{
+				// write fake core state to render data for animations
+				m_FakeSuperCore.Write(&m_aClients[i].m_RenderCur);
+				m_FakeSuperPrevCore.Write(&m_aClients[i].m_RenderPrev);
+
+				m_aClients[i].m_RenderPos = mix(m_FakeSuperPrevCore.m_Pos, m_FakeSuperCore.m_Pos, Client()->IntraGameTick(g_Config.m_ClDummy));
+				m_LocalCharacterPos = m_aClients[i].m_RenderPos;
+			}
+			// practice mode: override render data with practice simulated state
+			else if(m_PracticeActive)
+			{
+				// write practice core state to render data for animations
+				m_PracticeCore.Write(&m_aClients[i].m_RenderCur);
+				m_PracticePrevCore.Write(&m_aClients[i].m_RenderPrev);
+
+				m_aClients[i].m_RenderPos = mix(m_PracticePrevCore.m_Pos, m_PracticeCore.m_Pos, Client()->IntraGameTick(g_Config.m_ClDummy));
+				m_LocalCharacterPos = m_aClients[i].m_RenderPos;
+			}
+			else
+			{
+				m_LocalCharacterPos = Pos;
+			}
+		}
 	}
 }
 

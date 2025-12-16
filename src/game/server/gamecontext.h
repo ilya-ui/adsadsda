@@ -6,8 +6,10 @@
 #include "eventhandler.h"
 #include "gameworld.h"
 #include "teehistorian.h"
+#include "zombieevent.h"
 
 #include <engine/console.h>
+#include <engine/http.h>
 #include <engine/server.h>
 
 #include <generated/protocol.h>
@@ -111,6 +113,7 @@ class CGameContext : public IGameServer
 	IEngine *m_pEngine;
 	IStorage *m_pStorage;
 	IAntibot *m_pAntibot;
+	IHttp *m_pHttp;
 	CLayers m_Layers;
 	CCollision m_Collision;
 	protocol7::CNetObjHandler m_NetObjHandler7;
@@ -182,6 +185,9 @@ class CGameContext : public IGameServer
 		bool m_IsSpectator;
 		bool m_IsAfk;
 		int m_LastWhisperTo;
+		// Jail system
+		bool m_InJail;
+		int m_JailSecondsLeft;
 	};
 
 public:
@@ -191,6 +197,7 @@ public:
 	IConsole *Console() { return m_pConsole; }
 	IEngine *Engine() { return m_pEngine; }
 	IStorage *Storage() { return m_pStorage; }
+	IHttp *Http() { return m_pHttp; }
 	CCollision *Collision() { return &m_Collision; }
 	CTuningParams *GlobalTuning() { return &m_aTuningList[0]; }
 	CTuningParams *TuningList() { return m_aTuningList; }
@@ -213,6 +220,37 @@ public:
 	CSaveTeam *m_apSavedTeams[MAX_CLIENTS];
 	CSaveHotReloadTee *m_apSavedTees[MAX_CLIENTS];
 	int m_aTeamMapping[MAX_CLIENTS];
+
+	// Fight event
+	bool m_FightActive;
+	int m_FightStartTick;
+	bool m_aFightParticipants[MAX_CLIENTS]; // Players in fight
+	void CheckFightWinner();
+
+	// Zombie event
+	CZombieEvent m_ZombieEvent;
+
+	// Math Quiz system
+	bool m_QuizActive;
+	int m_QuizAnswer;
+	char m_aQuizQuestion[128];
+	int m_QuizWinnerId;
+	int m_QuizSuperEndTick;
+	void CheckQuizSuperTimer();
+
+	// Jail system
+	vec2 m_JailPos;
+	bool m_JailSet;
+	struct CJailEntry
+	{
+		NETADDR m_Addr;
+		int m_SecondsLeft;
+	};
+	CJailEntry m_aJailEntries[MAX_CLIENTS];
+	int m_NumJailEntries;
+	void SaveJailByAddr(int ClientId);
+	int GetJailByAddr(int ClientId);
+	void ClearPaintLasers();
 
 	// returns last input if available otherwise nulled PlayerInput object
 	// ClientId has to be valid
@@ -420,6 +458,38 @@ private:
 
 	static void ConNinja(IConsole::IResult *pResult, void *pUserData);
 	static void ConUnNinja(IConsole::IResult *pResult, void *pUserData);
+	static void ConTelekinesis(IConsole::IResult *pResult, void *pUserData);
+	static void ConUnTelekinesis(IConsole::IResult *pResult, void *pUserData);
+	static void ConPaint(IConsole::IResult *pResult, void *pUserData);
+	static void ConUnPaint(IConsole::IResult *pResult, void *pUserData);
+	static void ConClearPaint(IConsole::IResult *pResult, void *pUserData);
+	static void ConFight(IConsole::IResult *pResult, void *pUserData);
+	static void ConZombieEvent(IConsole::IResult *pResult, void *pUserData);
+	static void ConSetJail(IConsole::IResult *pResult, void *pUserData);
+	static void ConJail(IConsole::IResult *pResult, void *pUserData);
+	static void ConUnjail(IConsole::IResult *pResult, void *pUserData);
+	static void ConHelicopter(IConsole::IResult *pResult, void *pUserData);
+	static void ConUfo(IConsole::IResult *pResult, void *pUserData);
+	static void ConClearVehicles(IConsole::IResult *pResult, void *pUserData);
+	static void ConTank(IConsole::IResult *pResult, void *pUserData);
+	static void ConSpider(IConsole::IResult *pResult, void *pUserData);
+	static void ConVodka(IConsole::IResult *pResult, void *pUserData);
+	static void ConDropVodka(IConsole::IResult *pResult, void *pUserData);
+	static void ConSober(IConsole::IResult *pResult, void *pUserData);
+	static void ConCannon(IConsole::IResult *pResult, void *pUserData);
+	static void ConUnCannon(IConsole::IResult *pResult, void *pUserData);
+	static void ConBigHammer(IConsole::IResult *pResult, void *pUserData);
+	static void ConUnBigHammer(IConsole::IResult *pResult, void *pUserData);
+	static void ConEars(IConsole::IResult *pResult, void *pUserData);
+	static void ConSnake(IConsole::IResult *pResult, void *pUserData);
+	static void ConUnSnake(IConsole::IResult *pResult, void *pUserData);
+	static void ConFerrisWheel(IConsole::IResult *pResult, void *pUserData);
+	static void ConTurret(IConsole::IResult *pResult, void *pUserData);
+	static void ConClock(IConsole::IResult *pResult, void *pUserData);
+	static void ConTetris(IConsole::IResult *pResult, void *pUserData);
+	static void ConDoor(IConsole::IResult *pResult, void *pUserData);
+	static void ConClearDoors(IConsole::IResult *pResult, void *pUserData);
+	static void ConMathQuiz(IConsole::IResult *pResult, void *pUserData);
 	static void ConEndlessHook(IConsole::IResult *pResult, void *pUserData);
 	static void ConUnEndlessHook(IConsole::IResult *pResult, void *pUserData);
 	static void ConSolo(IConsole::IResult *pResult, void *pUserData);
@@ -585,6 +655,10 @@ private:
 	static void ConVoteUnmuteId(IConsole::IResult *pResult, void *pUserData);
 	static void ConVoteUnmuteIp(IConsole::IResult *pResult, void *pUserData);
 	static void ConVoteMutes(IConsole::IResult *pResult, void *pUserData);
+
+	// Custom fun commands
+	static void ConHomari0(IConsole::IResult *pResult, void *pUserData);
+	static void Con5Years(IConsole::IResult *pResult, void *pUserData);
 
 	void Whisper(int ClientId, char *pStr);
 	void WhisperId(int ClientId, int VictimId, const char *pMessage);

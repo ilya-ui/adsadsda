@@ -2388,6 +2388,8 @@ if(CLIENT)
     components/mapimages.h
     components/maplayers.cpp
     components/maplayers.h
+    components/maptravel.cpp
+    components/maptravel.h
     components/mapsounds.cpp
     components/mapsounds.h
     components/menu_background.cpp
@@ -2418,6 +2420,8 @@ if(CLIENT)
     components/race_demo.h
     components/scoreboard.cpp
     components/scoreboard.h
+    components/screen_drawing.cpp
+    components/screen_drawing.h
     components/skins.cpp
     components/skins.h
     components/skins7.cpp
@@ -2774,6 +2778,8 @@ if(SERVER)
   set_src(GAME_SERVER GLOB_RECURSE src/game/server
     ddracechat.cpp
     ddracecommands.cpp
+    entities/cannon.cpp
+    entities/cannon.h
     entities/character.cpp
     entities/character.h
     entities/door.cpp
@@ -2782,11 +2788,42 @@ if(SERVER)
     entities/dragger.h
     entities/dragger_beam.cpp
     entities/dragger_beam.h
+    entities/ferriswheel.cpp
+    entities/ferriswheel.h
     entities/gun.cpp
     entities/gun.h
+    entities/helicopter.cpp
+    entities/helicopter.h
+    entities/tank.cpp
+    entities/tank.h
+    entities/spider.cpp
+    entities/spider.h
+    entities/turret.cpp
+    entities/turret.h
+    entities/autoturret.cpp
+    entities/autoturret.h
+    entities/autotank.cpp
+    entities/autotank.h
+    entities/autocannon.cpp
+    entities/autocannon.h
+    entities/ufo.cpp
+    entities/ufo.h
     entities/laser.cpp
     entities/laser.h
+    entities/laserclock.cpp
+    entities/laserclock.h
+    entities/laserdoor.cpp
+    entities/laserdoor.h
+    entities/lasertetris.cpp
+    entities/lasertetris.h
+    entities/laserdoor.h
     entities/light.cpp
+    entities/paintlaser.cpp
+    entities/paintlaser.h
+    entities/vodkabottle.cpp
+    entities/vodkabottle.h
+    entities/snake.cpp
+    entities/snake.h
     entities/light.h
     entities/pickup.cpp
     entities/pickup.h
@@ -2823,7 +2860,10 @@ if(SERVER)
     teehistorian.h
     teeinfo.cpp
     teeinfo.h
+    zombieevent.cpp
+    zombieevent.h
   )
+
   set(GAME_GENERATED_SERVER
     "src/generated/server_data.cpp"
     "src/generated/server_data.h"
@@ -2869,6 +2909,7 @@ if(SERVER)
       PROPERTY OUTPUT_NAME ${SERVER_EXECUTABLE}
   )
   target_link_libraries(game-server-without-main ${LIBS_SERVER})
+  
   list(APPEND TARGETS_OWN game-server-without-main)
   list(APPEND TARGETS_LINK game-server-without-main)
 
@@ -3081,6 +3122,7 @@ if((GTEST_FOUND OR DOWNLOAD_GTEST) AND SERVER)
     unix_test.cpp
     uuid_test.cpp
     vmath_test.cpp
+    zombieevent_test.cpp
   )
   set(TESTS_EXTRA
     src/engine/client/blocklist_driver.cpp

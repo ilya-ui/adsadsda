@@ -3,6 +3,9 @@
 #include "gamecontext.h"
 
 #include "entities/character.h"
+#include "entities/helicopter.h"
+#include "entities/tank.h"
+#include "entities/ufo.h"
 #include "gamemodes/DDRace.h"
 #include "gamemodes/mod.h"
 #include "player.h"
@@ -74,7 +77,8 @@ void CClientChatLogger::Log(const CLogMessage *pMessage)
 
 CGameContext::CGameContext(bool Resetting) :
 	m_Mutes("mutes"),
-	m_VoteMutes("votemutes")
+	m_VoteMutes("votemutes"),
+	m_ZombieEvent(this)
 {
 	m_Resetting = false;
 	m_pServer = nullptr;
@@ -126,6 +130,24 @@ CGameContext::CGameContext(bool Resetting) :
 
 	m_aDeleteTempfile[0] = 0;
 	m_TeeHistorianActive = false;
+
+	// Fight event
+	m_FightActive = false;
+	m_FightStartTick = 0;
+	std::fill(std::begin(m_aFightParticipants), std::end(m_aFightParticipants), false);
+
+	// Math Quiz system
+	m_QuizActive = false;
+	m_QuizAnswer = 0;
+	m_aQuizQuestion[0] = '\0';
+	m_QuizWinnerId = -1;
+	m_QuizSuperEndTick = 0;
+
+	// Jail system
+	m_JailPos = vec2(0, 0);
+	m_JailSet = false;
+	m_NumJailEntries = 0;
+	mem_zero(m_aJailEntries, sizeof(m_aJailEntries));
 }
 
 CGameContext::~CGameContext()
@@ -1090,6 +1112,105 @@ void CGameContext::OnTick()
 	// check tuning
 	CheckPureTuning();
 
+	// Zombie event logic
+	m_ZombieEvent.Tick();
+
+	// Fight event logic
+	if(m_FightActive)
+	{
+		int TicksSinceStart = Server()->Tick() - m_FightStartTick;
+		int FreezeTime = 3 * Server()->TickSpeed(); // 3 seconds
+
+		// Freeze all participants for first 3 seconds
+		if(TicksSinceStart < FreezeTime)
+		{
+			for(int i = 0; i < MAX_CLIENTS; i++)
+			{
+				if(m_aFightParticipants[i])
+				{
+					CCharacter *pChr = GetPlayerChar(i);
+					if(pChr)
+					{
+						pChr->Freeze(FreezeTime / Server()->TickSpeed());
+					}
+				}
+			}
+		}
+		else if(TicksSinceStart == FreezeTime)
+		{
+			// Unfreeze all and announce fight start
+			SendChat(-1, TEAM_ALL, "*** FIGHT! ***");
+			for(int i = 0; i < MAX_CLIENTS; i++)
+			{
+				if(m_aFightParticipants[i])
+				{
+					CCharacter *pChr = GetPlayerChar(i);
+					if(pChr)
+					{
+						pChr->UnFreeze();
+					}
+				}
+			}
+		}
+		else
+		{
+			// Check for winner
+			CheckFightWinner();
+		}
+	}
+
+	// Jail system logic
+	for(int i = 0; i < MAX_CLIENTS; i++)
+	{
+		CPlayer *pPlayer = m_apPlayers[i];
+		if(pPlayer && pPlayer->m_InJail)
+		{
+			// Check if jail time expired
+			if(Server()->Tick() >= pPlayer->m_JailEndTick)
+			{
+				pPlayer->m_InJail = false;
+				pPlayer->m_JailEndTick = 0;
+				CCharacter *pChr = pPlayer->GetCharacter();
+				if(pChr)
+				{
+					pChr->UnFreeze();
+				}
+				char aBuf[128];
+				str_format(aBuf, sizeof(aBuf), "%s has been released from jail!", Server()->ClientName(i));
+				SendChat(-1, TEAM_ALL, aBuf);
+			}
+			else if(m_JailSet)
+			{
+				// Keep player in jail position and frozen
+				CCharacter *pChr = pPlayer->GetCharacter();
+				if(pChr)
+				{
+					// Always teleport to jail if not at jail position
+					if(distance(pChr->GetPos(), m_JailPos) > 50.0f)
+					{
+						Teleport(pChr, m_JailPos);
+						pChr->ResetVelocity();
+					}
+					pChr->Freeze();
+				}
+
+				// Show jail timer every second (only to the jailed player)
+				int SecondsLeft = (pPlayer->m_JailEndTick - Server()->Tick()) / Server()->TickSpeed();
+				if(Server()->Tick() % Server()->TickSpeed() == 0)
+				{
+					int Minutes = SecondsLeft / 60;
+					int Seconds = SecondsLeft % 60;
+					char aBuf[128];
+					str_format(aBuf, sizeof(aBuf), "JAIL TIME: %d:%02d", Minutes, Seconds);
+					SendBroadcast(aBuf, i, false);
+				}
+			}
+		}
+	}
+
+	// Math Quiz super timer
+	CheckQuizSuperTimer();
+
 	if(m_TeeHistorianActive)
 	{
 		int Error = aio_error(m_pTeeHistorianFile);
@@ -1776,6 +1897,16 @@ bool CGameContext::OnClientDataPersist(int ClientId, void *pData)
 	pPersistent->m_IsSpectator = m_apPlayers[ClientId]->GetTeam() == TEAM_SPECTATORS;
 	pPersistent->m_IsAfk = m_apPlayers[ClientId]->IsAfk();
 	pPersistent->m_LastWhisperTo = m_apPlayers[ClientId]->m_LastWhisperTo;
+	// Jail system - save remaining time
+	pPersistent->m_InJail = m_apPlayers[ClientId]->m_InJail;
+	if(m_apPlayers[ClientId]->m_InJail && m_apPlayers[ClientId]->m_JailEndTick > Server()->Tick())
+	{
+		pPersistent->m_JailSecondsLeft = (m_apPlayers[ClientId]->m_JailEndTick - Server()->Tick()) / Server()->TickSpeed();
+	}
+	else
+	{
+		pPersistent->m_JailSecondsLeft = 0;
+	}
 	return true;
 }
 
@@ -1785,11 +1916,15 @@ void CGameContext::OnClientConnected(int ClientId, void *pData)
 	bool Spec = false;
 	bool Afk = true;
 	int LastWhisperTo = -1;
+	bool InJail = false;
+	int JailSecondsLeft = 0;
 	if(pPersistentData)
 	{
 		Spec = pPersistentData->m_IsSpectator;
 		Afk = pPersistentData->m_IsAfk;
 		LastWhisperTo = pPersistentData->m_LastWhisperTo;
+		InJail = pPersistentData->m_InJail;
+		JailSecondsLeft = pPersistentData->m_JailSecondsLeft;
 	}
 	else
 	{
@@ -1822,6 +1957,23 @@ void CGameContext::OnClientConnected(int ClientId, void *pData)
 	const int StartTeam = (Spec || g_Config.m_SvTournamentMode) ? TEAM_SPECTATORS : m_pController->GetAutoTeam(ClientId);
 	CreatePlayer(ClientId, StartTeam, Afk, LastWhisperTo);
 
+	// Restore jail state if player was in jail (from persistent data or IP)
+	if(InJail && JailSecondsLeft > 0 && m_JailSet)
+	{
+		m_apPlayers[ClientId]->m_InJail = true;
+		m_apPlayers[ClientId]->m_JailEndTick = Server()->Tick() + JailSecondsLeft * Server()->TickSpeed();
+	}
+	else if(m_JailSet)
+	{
+		// Check if player was jailed by IP
+		int JailSeconds = GetJailByAddr(ClientId);
+		if(JailSeconds > 0)
+		{
+			m_apPlayers[ClientId]->m_InJail = true;
+			m_apPlayers[ClientId]->m_JailEndTick = Server()->Tick() + JailSeconds * Server()->TickSpeed();
+		}
+	}
+
 	SendMotd(ClientId);
 	SendSettings(ClientId);
 
@@ -1831,6 +1983,9 @@ void CGameContext::OnClientConnected(int ClientId, void *pData)
 void CGameContext::OnClientDrop(int ClientId, const char *pReason)
 {
 	LogEvent("Disconnect", ClientId);
+
+	// Save jail state by IP before disconnect
+	SaveJailByAddr(ClientId);
 
 	AbortVoteKickOnDisconnect(ClientId);
 	m_pController->OnPlayerDisconnect(m_apPlayers[ClientId], pReason);
@@ -2324,6 +2479,39 @@ void CGameContext::OnSayNetMessage(const CNetMsg_Cl_Say *pMsg, int ClientId, con
 	}
 	else
 	{
+		// Check for math quiz answer
+		if(m_QuizActive)
+		{
+			int Answer = str_toint(pMsg->m_pMessage);
+			if(Answer == m_QuizAnswer)
+			{
+				// Correct answer!
+				m_QuizActive = false;
+				m_QuizWinnerId = ClientId;
+				m_QuizSuperEndTick = Server()->Tick() + 30 * Server()->TickSpeed();
+
+				// Give super to winner
+				CCharacter *pChr = GetPlayerChar(ClientId);
+				if(pChr)
+				{
+					pChr->SetSuper(true);
+					pChr->UnFreeze();
+				}
+
+				char aBuf[256];
+				str_format(aBuf, sizeof(aBuf), "*** %s answered correctly: %d! SUPER for 30 seconds! ***", Server()->ClientName(ClientId), m_QuizAnswer);
+				SendChat(-1, TEAM_ALL, aBuf);
+
+				// Clear broadcast for all
+				for(int i = 0; i < MAX_CLIENTS; i++)
+				{
+					if(m_apPlayers[i])
+						SendBroadcast("", i, false);
+				}
+				return;
+			}
+		}
+
 		pPlayer->UpdatePlaytime();
 		char aCensoredMessage[256];
 		CensorMessage(aCensoredMessage, pMsg->m_pMessage, sizeof(aCensoredMessage));
@@ -2937,18 +3125,122 @@ void CGameContext::OnKillNetMessage(const CNetMsg_Cl_Kill *pMsg, int ClientId)
 	if(m_World.m_Paused)
 		return;
 
+	CPlayer *pPlayer = m_apPlayers[ClientId];
+	if(!pPlayer)
+		return;
+
+	// F4 to exit helicopter
+	if(pPlayer->m_InHelicopter && pPlayer->m_pHelicopter)
+	{
+		pPlayer->m_pHelicopter->RemovePilot();
+		SendChatTarget(ClientId, "You exited the helicopter.");
+		return;
+	}
+
+	// F4 to exit UFO (as pilot or victim)
+	if(pPlayer->m_InUfo && pPlayer->m_pUfo)
+	{
+		CUfo *pUfo = pPlayer->m_pUfo;
+		if(pUfo->GetPilot() == ClientId)
+		{
+			pUfo->RemovePilot();
+			SendChatTarget(ClientId, "You exited the UFO.");
+		}
+		else if(pUfo->GetVictim() == ClientId)
+		{
+			pUfo->ReleaseVictim();
+			SendChatTarget(ClientId, "You escaped from the UFO!");
+		}
+		return;
+	}
+
+	CCharacter *pChr = pPlayer->GetCharacter();
+
+	// F4 to enter nearby helicopter or UFO
+	if(pChr)
+	{
+		vec2 PlayerPos = pChr->GetPos();
+		
+		// Try to enter helicopter - search all helicopters
+		CEntity *pEnt = m_World.FindFirst(CGameWorld::ENTTYPE_HELICOPTER);
+		if(!pEnt)
+		{
+			// No helicopters found, try UFO
+			pEnt = m_World.FindFirst(CGameWorld::ENTTYPE_UFO);
+			if(!pEnt)
+			{
+				// No vehicles found - continue to normal kill
+			}
+			else
+			{
+				// Found UFO
+				while(pEnt)
+				{
+					CUfo *pUfo = dynamic_cast<CUfo *>(pEnt);
+					if(pUfo)
+					{
+						float Dist = distance(PlayerPos, pUfo->GetPos());
+						if(Dist < 500.0f && !pUfo->HasPilot())
+						{
+							pUfo->SetPilot(ClientId);
+							SendChatTarget(ClientId, "You entered the UFO! Move cursor to fly, LMB to abduct players below, K to exit.");
+							return;
+						}
+					}
+					pEnt = pEnt->TypeNext();
+				}
+			}
+		}
+		else
+		{
+			// Found helicopter
+			while(pEnt)
+			{
+				CHelicopter *pHeli = dynamic_cast<CHelicopter *>(pEnt);
+				if(pHeli)
+				{
+					float Dist = distance(PlayerPos, pHeli->GetPos());
+					if(Dist < 500.0f && !pHeli->HasPilot())
+					{
+						pHeli->SetPilot(ClientId);
+						SendChatTarget(ClientId, "You entered the helicopter! Move cursor to fly, K to exit.");
+						return;
+					}
+				}
+				pEnt = pEnt->TypeNext();
+			}
+			
+			// Also check UFO
+			pEnt = m_World.FindFirst(CGameWorld::ENTTYPE_UFO);
+			while(pEnt)
+			{
+				CUfo *pUfo = dynamic_cast<CUfo *>(pEnt);
+				if(pUfo)
+				{
+					float Dist = distance(PlayerPos, pUfo->GetPos());
+					if(Dist < 500.0f && !pUfo->HasPilot())
+					{
+						pUfo->SetPilot(ClientId);
+						SendChatTarget(ClientId, "You entered the UFO! Move cursor to fly, LMB to abduct players below, K to exit.");
+						return;
+					}
+				}
+				pEnt = pEnt->TypeNext();
+			}
+		}
+	}
+
+	// Normal kill logic
 	if(IsRunningKickOrSpecVote(ClientId) && GetDDRaceTeam(ClientId))
 	{
 		SendChatTarget(ClientId, "You are running a vote please try again after the vote is done!");
 		return;
 	}
-	CPlayer *pPlayer = m_apPlayers[ClientId];
 	if(pPlayer->m_LastKill && pPlayer->m_LastKill + Server()->TickSpeed() * g_Config.m_SvKillDelay > Server()->Tick())
 		return;
 	if(pPlayer->IsPaused())
 		return;
 
-	CCharacter *pChr = pPlayer->GetCharacter();
 	if(!pChr)
 		return;
 
@@ -3921,8 +4213,42 @@ void CGameContext::RegisterDDRaceCommands()
 	Console()->Register("unweapons", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConUnWeapons, this, "Removes all weapons from you");
 	Console()->Register("ninja", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConNinja, this, "Makes you a ninja");
 	Console()->Register("unninja", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConUnNinja, this, "Removes ninja from you");
-	Console()->Register("super", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConSuper, this, "Makes you super");
-	Console()->Register("unsuper", "", CFGFLAG_SERVER, ConUnSuper, this, "Removes super from you");
+	Console()->Register("telekinesis", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConTelekinesis, this, "Gives you telekinesis (ninja + grab players)");
+	Console()->Register("untelekinesis", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConUnTelekinesis, this, "Removes telekinesis from you");
+	Console()->Register("fight", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConFight, this, "Starts a fight event - all players fight until one remains");
+	Console()->Register("zombieevent", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConZombieEvent, this, "Starts a zombie survival event - builders vs zombies");
+	Console()->Register("paint", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConPaint, this, "Enable paint mode - hold fire to draw lasers visible to all");
+	Console()->Register("unpaint", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConUnPaint, this, "Disable paint mode");
+	Console()->Register("clearpaint", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConClearPaint, this, "Clear all paint lasers");
+	Console()->Register("setjail", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConSetJail, this, "Set jail position at your current location");
+	Console()->Register("jail", "v[id] ?i[minutes]", CFGFLAG_SERVER | CMDFLAG_TEST, ConJail, this, "Jail a player for specified minutes (default 5)");
+	Console()->Register("unjail", "v[id]", CFGFLAG_SERVER | CMDFLAG_TEST, ConUnjail, this, "Release a player from jail");
+	Console()->Register("helicopter", "?v[id]", CFGFLAG_SERVER | CMDFLAG_TEST, ConHelicopter, this, "Toggle helicopter mode - fly with cursor, K to exit");
+	Console()->Register("ufo", "?v[id]", CFGFLAG_SERVER | CMDFLAG_TEST, ConUfo, this, "Toggle UFO mode - fly with cursor, RMB to abduct players below");
+	Console()->Register("clearvehicles", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConClearVehicles, this, "Remove all helicopters, UFOs and tanks");
+	Console()->Register("tank", "?v[id]", CFGFLAG_SERVER | CMDFLAG_TEST, ConTank, this, "Toggle tank mode - A/D to move, aim with cursor, LMB to fire");
+	Console()->Register("spider", "?v[id]", CFGFLAG_SERVER | CMDFLAG_TEST, ConSpider, this, "Toggle spider exoskeleton - A/D to move, Space to jump, LMB to fire grenades");
+	Console()->Register("vodka", "?v[id]", CFGFLAG_SERVER | CMDFLAG_TEST, ConVodka, this, "Get vodka - LMB to drink, F3 to drop");
+	Console()->Register("dropvodka", "?v[id]", CFGFLAG_SERVER | CMDFLAG_TEST, ConDropVodka, this, "Drop vodka bottle on the ground");
+	Console()->Register("sober", "?v[id]", CFGFLAG_SERVER | CMDFLAG_TEST, ConSober, this, "Become sober again");
+	Console()->Register("cannon", "?v[id]", CFGFLAG_SERVER | CMDFLAG_TEST, ConCannon, this, "Get a cannon - RMB to suck players, LMB to fire them");
+	Console()->Register("uncannon", "?v[id]", CFGFLAG_SERVER | CMDFLAG_TEST, ConUnCannon, this, "Remove your cannon");
+	Console()->Register("bighammer", "?v[id]", CFGFLAG_SERVER | CMDFLAG_TEST, ConBigHammer, this, "Enable giant laser hammer effect");
+	Console()->Register("unbighammer", "?v[id]", CFGFLAG_SERVER | CMDFLAG_TEST, ConUnBigHammer, this, "Disable giant laser hammer effect");
+	Console()->Register("ears", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConEars, this, "Toggle cat ears (M shape) above your head");
+	Console()->Register("snake", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConSnake, this, "Spawn a laser snake that hunts and eats players");
+	Console()->Register("unsnake", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConUnSnake, this, "Remove all laser snakes");
+	Console()->Register("ferriswheel", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConFerrisWheel, this, "Spawn a ferris wheel - hammer seats to enter/exit");
+	Console()->Register("turret", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConTurret, this, "Spawn a laser turret - hammer to enter, LMB to fire");
+	Console()->Register("clock", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConClock, this, "Spawn laser clock showing real time HH:MM:SS");
+	Console()->Register("tetris", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConTetris, this, "Spawn laser Tetris game - hammer to start/exit");
+	Console()->Register("door", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConDoor, this, "Create a door - use twice to set two points");
+	Console()->Register("cleardoors", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConClearDoors, this, "Remove all doors");
+	Console()->Register("mathquiz", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConMathQuiz, this, "Start a math quiz - first correct answer wins super for 30 sec");
+	Console()->Register("homari0", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConHomari0, this, "Changes all players' nicknames to homari0");
+	Console()->Register("5years", "", CFGFLAG_SERVER | CMDFLAG_TEST, Con5Years, this, "Changes all players' nicknames to 5years and skin to hedwige");
+	Console()->Register("super", "?i[id]", CFGFLAG_SERVER | CMDFLAG_TEST, ConSuper, this, "Makes you or player with ID super");
+	Console()->Register("unsuper", "?i[id]", CFGFLAG_SERVER, ConUnSuper, this, "Removes super from you or player with ID");
 	Console()->Register("invincible", "?i['0'|'1']", CFGFLAG_SERVER | CMDFLAG_TEST, ConToggleInvincible, this, "Toggles invincible mode");
 	Console()->Register("infinite_jump", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConEndlessJump, this, "Gives you infinite jump");
 	Console()->Register("uninfinite_jump", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConUnEndlessJump, this, "Removes infinite jump from you");
@@ -4090,6 +4416,7 @@ void CGameContext::OnInit(const void *pPersistentData)
 	m_pEngine = Kernel()->RequestInterface<IEngine>();
 	m_pStorage = Kernel()->RequestInterface<IStorage>();
 	m_pAntibot = Kernel()->RequestInterface<IAntibot>();
+	m_pHttp = Kernel()->RequestInterface<IHttp>();
 	m_World.SetGameServer(this);
 	m_Events.SetGameServer(this);
 

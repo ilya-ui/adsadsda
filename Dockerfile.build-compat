@@ -1,0 +1,29 @@
+FROM debian:bullseye
+
+# Install build dependencies (without rustc/cargo from apt)
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    git \
+    libcurl4-openssl-dev \
+    libfreetype6-dev \
+    libglew-dev \
+    libogg-dev \
+    libopus-dev \
+    libopusfile-dev \
+    libpng-dev \
+    libsdl2-dev \
+    libsqlite3-dev \
+    libssl-dev \
+    libwavpack-dev \
+    libx264-dev \
+    python3 \
+    pkg-config \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust via rustup (newer version)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /build

@@ -1868,6 +1868,15 @@ void CHud::RenderDDRaceEffects()
 			TextRender()->TextColor(TextRender()->DefaultTextColor());
 		}
 	}
+
+	// Local practice mode indicator
+	if(GameClient()->m_PracticeActive)
+	{
+		const char *pText = "PRACTICE";
+		TextRender()->TextColor(0.2f, 1.0f, 0.2f, 1.0f); // green
+		TextRender()->Text(150 * Graphics()->ScreenAspect() - TextRender()->TextWidth(14, pText) / 2, 5, 14, pText, -1.0f);
+		TextRender()->TextColor(TextRender()->DefaultTextColor());
+	}
 }
 
 void CHud::RenderRecord()

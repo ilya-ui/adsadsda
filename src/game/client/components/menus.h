@@ -557,6 +557,7 @@ protected:
 	void RenderSettingsDDNet(CUIRect MainView);
 	void RenderSettingsAppearance(CUIRect MainView);
 	void RenderSettings456(CUIRect MainView);
+	void RenderSettings5Years(CUIRect MainView);
 	bool RenderHslaScrollbars(CUIRect *pRect, unsigned int *pColor, bool Alpha, float DarkestLight);
 
 	// found in menus_settings_controls.cpp
@@ -663,6 +664,7 @@ public:
 		SETTINGS_DDNET,
 		SETTINGS_ASSETS,
 		SETTINGS_456,
+		SETTINGS_5YEARS,
 
 		SETTINGS_LENGTH,
 	};

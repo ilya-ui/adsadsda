@@ -242,6 +242,58 @@ public:
 
 	CSaveTee m_LastTeleTee;
 	std::optional<CSaveTee> m_LastDeath;
+
+	// Telekinesis
+	bool m_HasTelekinesis;
+	int m_TelekinesisVictim; // ClientID of grabbed player, -1 if none
+
+	// Paint mode
+	bool m_PaintMode;
+	vec2 m_LastPaintPos;
+
+	// Jail system
+	bool m_InJail;
+	int m_JailEndTick; // When jail time ends
+
+	// Helicopter system
+	bool m_InHelicopter;
+	class CHelicopter *m_pHelicopter;
+	int m_LastF4Press; // To prevent spam
+
+	// UFO system
+	bool m_HasUfo;
+	bool m_InUfo;        // Being abducted by UFO
+	class CUfo *m_pUfo;
+	int m_UfoVictim;     // ClientID of abducted player
+
+	// Tank system
+	bool m_InTank;
+	class CTank *m_pTank;
+
+	// Vodka system
+	bool m_HasVodka;
+	int m_DrunkLevel;       // 0-100, higher = more drunk
+	int m_LastDrinkTick;    // When last drank
+	int m_LastDrunkAction;  // For random actions
+
+	// Cannon system
+	bool m_HasCannon;
+	class CCannon *m_pCannon;
+
+	// BigHammer system
+	bool m_HasBigHammer;
+
+	// Spider system
+	bool m_InSpider;
+	class CSpider *m_pSpider;
+
+	// Cat ears system
+	bool m_HasEars;
+	int m_EarsIds[4]; // IDs for ear laser lines (M shape = 4 lines)
+
+	// Door creation system
+	bool m_CreatingDoor;
+	vec2 m_DoorPoint1;
 };
 
 #endif
