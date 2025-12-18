@@ -1,6 +1,7 @@
 /* (c) Magnus Auvinen. See licence.txt in the root of the distribution for more information. */
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include "character.h"
+#include "vipblock.h"
 
 #include "ferriswheel.h"
 #include "helicopter.h"
@@ -469,6 +470,15 @@ void CCharacter::HandleWeaponSwitch()
 
 void CCharacter::FireWeapon()
 {
+	if(GameServer()->m_WarioWareState == WW_STATE_MICROGAME && GameServer()->m_CurrentMicroGame == WW_GAME_SHOOT)
+	{
+		if(m_pPlayer && !m_pPlayer->m_WarioWareWin)
+		{
+			m_pPlayer->m_WarioWareWin = true;
+			GameServer()->SendChatTarget(m_pPlayer->GetCid(), "SUCCESS!");
+		}
+	}
+
 	if(m_ReloadTimer != 0)
 	{
 		if(m_LatestInput.m_Fire & 1)
@@ -778,10 +788,11 @@ void CCharacter::FireWeapon()
 				false, //Freeze
 				false, //Explosive
 				-1, //SoundImpact
-				MouseTarget //InitDir
+				MouseTarget, //InitDir
+				m_pPlayer->m_HeartGun //IsHeart
 			);
 
-			GameServer()->CreateSound(m_Pos, SOUND_GUN_FIRE, TeamMask()); // NOLINT(clang-analyzer-unix.Malloc)
+			GameServer()->CreateSound(m_Pos, m_pPlayer->m_HeartGun ? SOUND_PICKUP_HEALTH : SOUND_GUN_FIRE, TeamMask()); // NOLINT(clang-analyzer-unix.Malloc)
 		}
 	}
 	break;
@@ -1047,6 +1058,17 @@ void CCharacter::PreTick()
 
 	Antibot()->OnCharacterTick(m_pPlayer->GetCid());
 
+	if(m_pPlayer->m_pDrone)
+	{
+		m_Core.m_Input = m_Input;
+		m_Core.m_Input.m_Direction = 0;
+		m_Core.m_Input.m_Jump = 0;
+		m_Core.m_Input.m_Hook = 0;
+		m_Core.m_Input.m_Fire = 0;
+		m_Core.Tick(true, !g_Config.m_SvNoWeakHook);
+		return;
+	}
+
 	m_Core.m_Input = m_Input;
 	m_Core.Tick(true, !g_Config.m_SvNoWeakHook);
 }
@@ -1063,6 +1085,49 @@ void CCharacter::Tick()
 	else
 	{
 		PreTick();
+	}
+
+	if(GameServer()->m_WarioWareState == WW_STATE_MICROGAME && GameServer()->m_CurrentMicroGame == WW_GAME_HOOK && m_Core.HookedPlayer() != -1)
+	{
+		if(m_pPlayer && !m_pPlayer->m_WarioWareWin)
+		{
+			m_pPlayer->m_WarioWareWin = true;
+			GameServer()->SendChatTarget(m_pPlayer->GetCid(), "SUCCESS!");
+		}
+	}
+
+	// VIP Block Placement
+	if(m_pPlayer && m_pPlayer->m_VipBlockState > 0)
+	{
+		vec2 CursorPos = m_Pos + vec2(m_Input.m_TargetX, m_Input.m_TargetY);
+		bool FirePressed = (m_Input.m_Fire & 1) != 0;
+		if(m_pPlayer->m_VipBlockState == 1) // Waiting for press
+		{
+			if(FirePressed)
+			{
+				m_pPlayer->m_VipBlockStartPos = CursorPos;
+				m_pPlayer->m_VipBlockState = 2; // Dragging
+			}
+		}
+		else if(m_pPlayer->m_VipBlockState == 2) // Dragging
+		{
+			if(!FirePressed)
+			{
+				vec2 To = CursorPos;
+				float dx = absolute(To.x - m_pPlayer->m_VipBlockStartPos.x);
+				float dy = absolute(To.y - m_pPlayer->m_VipBlockStartPos.y);
+				if(dx > dy)
+					To.y = m_pPlayer->m_VipBlockStartPos.y;
+				else
+					To.x = m_pPlayer->m_VipBlockStartPos.x;
+
+				new CVipBlock(GameWorld(), m_pPlayer->m_VipBlockStartPos, To, m_pPlayer->m_VipBlockType);
+				m_pPlayer->m_VipBlockState = 0; // Done
+				GameServer()->SendChatTarget(m_pPlayer->GetCid(), "VIP Door created!");
+			}
+		}
+		// Consume fire input to prevent shooting while placing
+		m_Input.m_Fire = 0;
 	}
 
 	if(!m_PrevInput.m_Hook && m_Input.m_Hook && !(m_Core.m_TriggeredEvents & COREEVENT_HOOK_ATTACH_PLAYER))

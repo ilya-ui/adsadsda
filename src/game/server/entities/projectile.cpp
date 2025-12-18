@@ -3,6 +3,7 @@
 #include "projectile.h"
 
 #include "character.h"
+#include <game/server/player.h>
 
 #include <engine/shared/config.h>
 
@@ -23,6 +24,7 @@ CProjectile::CProjectile(
 	bool Explosive,
 	int SoundImpact,
 	vec2 InitDir,
+	bool IsHeart,
 	int Layer,
 	int Number) :
 	CEntity(pGameWorld, CGameWorld::ENTTYPE_PROJECTILE)
@@ -35,6 +37,7 @@ CProjectile::CProjectile(
 	m_SoundImpact = SoundImpact;
 	m_StartTick = Server()->Tick();
 	m_Explosive = Explosive;
+	m_IsHeart = IsHeart;
 
 	m_Layer = Layer;
 	m_Number = Number;
@@ -214,7 +217,15 @@ void CProjectile::Tick()
 		}
 		else if(m_Type == WEAPON_GUN)
 		{
-			GameServer()->CreateDamageInd(CurPos, -std::atan2(m_Direction.x, m_Direction.y), 10, (m_Owner != -1) ? TeamMask : CClientMask().set());
+			if(m_IsHeart)
+			{
+				if(pTargetChr)
+					GameServer()->SendEmoticon(pTargetChr->GetPlayer()->GetCid(), EMOTICON_HEARTS, -1);
+			}
+			else
+			{
+				GameServer()->CreateDamageInd(CurPos, -std::atan2(m_Direction.x, m_Direction.y), 10, (m_Owner != -1) ? TeamMask : CClientMask().set());
+			}
 			m_MarkedForDestroy = true;
 			return;
 		}
@@ -305,6 +316,12 @@ void CProjectile::Snap(int SnappingClient)
 
 	if(SnappingClient != SERVER_DEMO_CLIENT && m_Owner != -1 && !TeamMask.test(SnappingClient))
 		return;
+
+	if(m_IsHeart)
+	{
+		GameServer()->SnapPickup(CSnapContext(SnappingClientVersion, Server()->IsSixup(SnappingClient), SnappingClient), GetId(), GetPos(Ct), POWERUP_HEALTH, 0, 0, 0);
+		return;
+	}
 
 	CNetObj_DDRaceProjectile DDRaceProjectile;
 

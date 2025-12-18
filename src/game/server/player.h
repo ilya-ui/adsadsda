@@ -297,6 +297,25 @@ public:
 
 	// Freezehammer system
 	bool m_FreezeHammer;
+
+	// Drone system
+	class CDrone *m_pDrone;
+
+	// Heartgun system
+	bool m_HeartGun;
+	bool m_IsVip;
+	bool m_Rainbow;
+	bool m_Ghost;
+	int m_RainbowColor;
+
+	// VIP Block Placement
+	int m_VipBlockState; // 0=idle, 1=waiting for press, 2=dragging
+	vec2 m_VipBlockStartPos;
+	int m_VipBlockType;
+
+	// WarioWare
+	int m_WarioWarePoints;
+	bool m_WarioWareWin;
 };
 
 #endif

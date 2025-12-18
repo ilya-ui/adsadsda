@@ -2828,13 +2828,19 @@ if(SERVER)
     entities/snake.h
     entities/snake_board.cpp
     entities/snake_board.h
+    entities/drone.cpp
+    entities/drone.h
     entities/light.h
+    entities/flag.cpp
+    entities/flag.h
     entities/pickup.cpp
     entities/pickup.h
     entities/plasma.cpp
     entities/plasma.h
     entities/projectile.cpp
     entities/projectile.h
+    entities/vipblock.cpp
+    entities/vipblock.h
     entity.cpp
     entity.h
     eventhandler.cpp

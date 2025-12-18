@@ -1,0 +1,1 @@
+wsl -d Ubuntu bash -c "cd /mnt/c/Users/5year/OneDrive/Desktop/ddnet-master; rm -rf build-wsl; mkdir build-wsl; cd build-wsl; cmake -DCMAKE_BUILD_TYPE=Release -DSERVER=ON -DCLIENT=OFF -DTOOLS=OFF -DVIDEORECORDER=OFF -DAUTOUPDATE=OFF ..; cmake --build . --config Release --target DDNet-Server -j`$(nproc); ldd DDNet-Server | grep GLIBC; ls -lh DDNet-Server"

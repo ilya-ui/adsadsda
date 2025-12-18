@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aether Config Generator - DDNet</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="dark-theme">
+    <div class="app-container">
+        <aside class="sidebar glass">
+            <div class="logo">
+                <span class="logo-icon">🪴</span>
+                <h1>Aether</h1>
+            </div>
+            
+            <div class="settings-group">
+                <h3>Global Settings</h3>
+                <div class="input-field">
+                    <label for="bind-key">Bind Key</label>
+                    <input type="text" id="bind-key" value="x" placeholder="e.g. x">
+                </div>
+                <div class="input-field">
+                    <label for="folder-name">Folder Name</label>
+                    <input type="text" id="folder-name" value="aether" placeholder="e.g. aether">
+                </div>
+                <div class="input-field">
+                    <label for="default-cmds">Default Commands (RCON)</label>
+                    <textarea id="default-cmds" placeholder="e.g. sv_test_cmds 1">echo "Teleported!"</textarea>
+                </div>
+            </div>
+
+            <div class="points-list-container">
+                <h3>Points (<span id="point-count">0</span>)</h3>
+                <div id="points-list" class="points-list">
+                    <!-- Points will be listed here -->
+                </div>
+            </div>
+
+            <div class="actions">
+                <button id="generate-btn" class="primary-btn">Generate Configs ☄️</button>
+                <div class="secondary-actions">
+                    <button id="export-state-btn" class="icon-btn" title="Export State">📥</button>
+                    <button id="import-state-btn" class="icon-btn" title="Import State">📤</button>
+                    <button id="clear-all-btn" class="icon-btn danger" title="Clear All">🗑️</button>
+                </div>
+            </div>
+        </aside>
+
+        <main class="canvas-area">
+            <div class="canvas-header glass">
+                <div class="coord-display">
+                    X: <span id="cur-x">0</span>, Y: <span id="cur-y">0</span>
+                </div>
+                <div class="canvas-controls">
+                    <button id="zoom-in" class="icon-btn">+</button>
+                    <button id="zoom-out" class="icon-btn">-</button>
+                    <button id="reset-view" class="icon-btn">Reset</button>
+                </div>
+            </div>
+            <div class="canvas-wrapper" id="canvas-wrapper">
+                <canvas id="main-canvas"></canvas>
+            </div>
+        </main>
+    </div>
+
+    <!-- Edit Point Modal -->
+    <div id="edit-modal" class="modal hidden">
+        <div class="modal-content glass">
+            <h2>Edit Point Commands</h2>
+            <p id="modal-point-info">Point (0, 0)</p>
+            <textarea id="point-cmds" placeholder="Custom commands for this point..."></textarea>
+            <div class="modal-actions">
+                <button id="modal-save" class="primary-btn">Save</button>
+                <button id="modal-close" class="secondary-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Overlay for generation success -->
+    <div id="success-overlay" class="overlay hidden">
+        <div class="overlay-content glass">
+            <h2>Configs Generated! 🎉</h2>
+            <p>Paste this into DDNet console:</p>
+            <div class="code-box" id="start-cmd-box">
+                <code id="start-cmd">rcon exec aether/1.cfg</code>
+                <button class="copy-btn" id="copy-start-cmd">Copy</button>
+            </div>
+            <button id="download-zip" class="primary-btn">Download .zip Archive</button>
+            <button id="close-overlay" class="secondary-btn">Close</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

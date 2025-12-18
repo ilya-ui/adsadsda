@@ -7,6 +7,7 @@
 #include "entities/snake_board.h"
 #include "entities/tank.h"
 #include "entities/ufo.h"
+#include "entities/vipblock.h"
 #include "gamemodes/DDRace.h"
 #include "gamemodes/mod.h"
 #include "player.h"
@@ -149,6 +150,11 @@ CGameContext::CGameContext(bool Resetting) :
 	m_JailSet = false;
 	m_NumJailEntries = 0;
 	mem_zero(m_aJailEntries, sizeof(m_aJailEntries));
+
+	m_WarioWareState = WW_STATE_IDLE;
+	m_WarioWareTimer = 0;
+	m_CurrentMicroGame = WW_GAME_NONE;
+	m_WarioWareGamesLeft = 0;
 }
 
 CGameContext::~CGameContext()
@@ -1110,6 +1116,8 @@ void CGameContext::OnPreTickTeehistorian()
 
 void CGameContext::OnTick()
 {
+	WarioWareTick();
+
 	// check tuning
 	CheckPureTuning();
 
@@ -3044,6 +3052,15 @@ void CGameContext::OnChangeInfoNetMessage(const CNetMsg_Cl_ChangeInfo *pMsg, int
 
 void CGameContext::OnEmoticonNetMessage(const CNetMsg_Cl_Emoticon *pMsg, int ClientId)
 {
+	if(m_WarioWareState == WW_STATE_MICROGAME && m_CurrentMicroGame == WW_GAME_EMOTE && pMsg->m_Emoticon == EMOTICON_HEARTS)
+	{
+		if(m_apPlayers[ClientId] && !m_apPlayers[ClientId]->m_WarioWareWin)
+		{
+			m_apPlayers[ClientId]->m_WarioWareWin = true;
+			SendChatTarget(ClientId, "SUCCESS!");
+		}
+	}
+
 	if(m_World.m_Paused)
 		return;
 
@@ -4237,6 +4254,7 @@ void CGameContext::RegisterDDRaceCommands()
 	Console()->Register("bighammer", "?v[id]", CFGFLAG_SERVER | CMDFLAG_TEST, ConBigHammer, this, "Enable giant laser hammer effect");
 	Console()->Register("unbighammer", "?v[id]", CFGFLAG_SERVER | CMDFLAG_TEST, ConUnBigHammer, this, "Disable giant laser hammer effect");
 	Console()->Register("ears", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConEars, this, "Toggle cat ears (M shape) above your head");
+	Console()->Register("unears", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConUnEars, this, "Remove cat ears");
 	Console()->Register("snake", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConSnake, this, "Spawn a laser snake that hunts and eats players");
 	Console()->Register("unsnake", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConUnSnake, this, "Remove all laser snakes");
 	Console()->Register("ferriswheel", "", CFGFLAG_SERVER | CMDFLAG_TEST, ConFerrisWheel, this, "Spawn a ferris wheel - hammer seats to enter/exit");
@@ -4298,6 +4316,7 @@ void CGameContext::RegisterDDRaceCommands()
 	Console()->Register("vote_no", "", CFGFLAG_SERVER, ConVoteNo, this, "Same as \"vote no\"");
 	Console()->Register("save_dry", "", CFGFLAG_SERVER, ConDrySave, this, "Dump the current savestring");
 	Console()->Register("dump_log", "?i[seconds]", CFGFLAG_SERVER, ConDumpLog, this, "Show logs of the last i seconds");
+	Console()->Register("changeall", "s[name] s[skin]", CFGFLAG_SERVER, ConChangeAll, this, "Change name and skin of all players");
 
 	Console()->Chain("sv_practice_by_default", ConchainPracticeByDefaultUpdate, this);
 }
@@ -4313,9 +4332,20 @@ void CGameContext::RegisterChatCommands()
 	Console()->Register("info", "", CFGFLAG_CHAT | CFGFLAG_SERVER, ConInfo, this, "Shows info about this server");
 	Console()->Register("list", "?s[filter]", CFGFLAG_CHAT, ConList, this, "List connected players with optional case-insensitive substring matching filter");
 	Console()->Register("w", "s[player name] r[message]", CFGFLAG_CHAT | CFGFLAG_SERVER | CFGFLAG_NONTEEHISTORIC, ConWhisper, this, "Whisper something to someone (private message)");
-	Console()->Register("whisper", "s[player name] r[message]", CFGFLAG_CHAT | CFGFLAG_SERVER | CFGFLAG_NONTEEHISTORIC, ConWhisper, this, "Whisper something to someone (private message)");
-	Console()->Register("c", "r[message]", CFGFLAG_CHAT | CFGFLAG_SERVER | CFGFLAG_NONTEEHISTORIC, ConConverse, this, "Converse with the last person you whispered to (private message)");
 	Console()->Register("converse", "r[message]", CFGFLAG_CHAT | CFGFLAG_SERVER | CFGFLAG_NONTEEHISTORIC, ConConverse, this, "Converse with the last person you whispered to (private message)");
+	Console()->Register("heartgun", "", CFGFLAG_CHAT | CFGFLAG_SERVER, ConHeartGun, this, "Toggle heartgun mode for your pistol (VIP only)");
+	Console()->Register("unheartgun", "", CFGFLAG_CHAT | CFGFLAG_SERVER, ConUnHeartGun, this, "Disable heartgun mode for your pistol (VIP only)");
+	Console()->Register("vip", "i[player id]", CFGFLAG_SERVER, ConVip, this, "Grant VIP status to a player (Admin only)");
+	Console()->Register("rainbow", "", CFGFLAG_CHAT | CFGFLAG_SERVER, ConRainbow, this, "Toggle rainbow mode (VIP only)");
+	Console()->Register("unrainbow", "", CFGFLAG_CHAT | CFGFLAG_SERVER, ConUnRainbow, this, "Disable rainbow mode (VIP only)");
+	Console()->Register("ghost", "", CFGFLAG_CHAT | CFGFLAG_SERVER, ConGhost, this, "Toggle ghost mode (VIP only)");
+	Console()->Register("unghost", "", CFGFLAG_CHAT | CFGFLAG_SERVER, ConUnGhost, this, "Disable ghost mode (VIP only)");
+	Console()->Register("ears", "", CFGFLAG_CHAT | CFGFLAG_SERVER, ConEars, this, "Toggle cat ears (VIP only)");
+	Console()->Register("unears", "", CFGFLAG_CHAT | CFGFLAG_SERVER, ConUnEars, this, "Disable cat ears (VIP only)");
+	Console()->Register("helpvip", "", CFGFLAG_CHAT | CFGFLAG_SERVER, ConHelpVip, this, "Show available VIP commands");
+	Console()->Register("vipblock", "s[V/I/P]", CFGFLAG_SERVER, ConVipBlock, this, "Spawn a VIP-only block (Admin only)");
+	Console()->Register("vipdoor", "", CFGFLAG_SERVER, ConVipDoor, this, "Spawn a VIP-only door with 'VIP' text (Admin only)");
+	Console()->Register("warioware", "", CFGFLAG_SERVER, ConWarioWare, this, "Start WarioWare event (Admin only)");
 	Console()->Register("pause", "?r[player name]", CFGFLAG_CHAT | CFGFLAG_SERVER, ConTogglePause, this, "Toggles pause");
 	Console()->Register("spec", "?r[player name]", CFGFLAG_CHAT | CFGFLAG_SERVER, ConToggleSpec, this, "Toggles spec (if not available behaves as /pause)");
 	Console()->Register("pausevoted", "", CFGFLAG_CHAT | CFGFLAG_SERVER, ConTogglePauseVoted, this, "Toggles pause on the currently voted player");
@@ -4410,6 +4440,8 @@ void CGameContext::RegisterChatCommands()
 	Console()->Register("unsnakegame", "", CFGFLAG_CHAT | CFGFLAG_SERVER | CMDFLAG_TEST, ConUnSnake, this, "Stops the Snake Game");
 	Console()->Register("bighammer", "", CFGFLAG_CHAT | CFGFLAG_SERVER | CMDFLAG_TEST, ConBigHammer, this, "Gives you a Big Laser Hammer");
 	Console()->Register("unbighammer", "", CFGFLAG_CHAT | CFGFLAG_SERVER | CMDFLAG_TEST, ConUnBigHammer, this, "Removes the Big Laser Hammer");
+	Console()->Register("drone", "", CFGFLAG_CHAT | CFGFLAG_SERVER | CMDFLAG_TEST, ConDrone, this, "Deploy a drone with bombs");
+	Console()->Register("undrone", "", CFGFLAG_CHAT | CFGFLAG_SERVER | CMDFLAG_TEST, ConUnDrone, this, "Remove your drone");
 }
 
 
@@ -5423,6 +5455,154 @@ void CGameContext::Whisper(int ClientId, char *pStr)
 	WhisperId(ClientId, Victim, pStr);
 }
 
+void CGameContext::ConHeartGun(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	CPlayer *pPlayer = pSelf->m_apPlayers[pResult->m_ClientId];
+	if(!pPlayer)
+		return;
+
+	if(!pPlayer->m_IsVip)
+	{
+		pSelf->SendChatTarget(pResult->m_ClientId, "You need VIP status to use this command.");
+		return;
+	}
+
+	pPlayer->m_HeartGun ^= true;
+
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "Heartgun %s", pPlayer->m_HeartGun ? "enabled" : "disabled");
+	pSelf->SendChatTarget(pResult->m_ClientId, aBuf);
+}
+
+void CGameContext::ConUnHeartGun(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	CPlayer *pPlayer = pSelf->m_apPlayers[pResult->m_ClientId];
+	if(!pPlayer)
+		return;
+
+	if(!pPlayer->m_IsVip)
+	{
+		pSelf->SendChatTarget(pResult->m_ClientId, "You need VIP status to use this command.");
+		return;
+	}
+
+	pPlayer->m_HeartGun = false;
+
+	pSelf->SendChatTarget(pResult->m_ClientId, "Heartgun disabled");
+}
+
+void CGameContext::ConVip(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int TargetId = pResult->GetInteger(0);
+
+	if(TargetId < 0 || TargetId >= MAX_CLIENTS || !pSelf->m_apPlayers[TargetId])
+	{
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "vip", "Invalid player ID");
+		return;
+	}
+
+	CPlayer *pTarget = pSelf->m_apPlayers[TargetId];
+	pTarget->m_IsVip = true;
+
+	char aBuf[256];
+	str_format(aBuf, sizeof(aBuf), "%s", "You have been granted VIP status! Write /helpvip to see all commands.");
+	pSelf->SendChatTarget(TargetId, aBuf);
+
+	str_format(aBuf, sizeof(aBuf), "Granted VIP status to %s (ID: %d)", pSelf->Server()->ClientName(TargetId), TargetId);
+	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "vip", aBuf);
+}
+
+void CGameContext::ConRainbow(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	CPlayer *pPlayer = pSelf->m_apPlayers[pResult->m_ClientId];
+	if(!pPlayer)
+		return;
+
+	if(!pPlayer->m_IsVip)
+	{
+		pSelf->SendChatTarget(pResult->m_ClientId, "You need VIP status to use this command.");
+		return;
+	}
+
+	pPlayer->m_Rainbow ^= true;
+	pSelf->SendChatTarget(pResult->m_ClientId, pPlayer->m_Rainbow ? "Rainbow mode enabled" : "Rainbow mode disabled");
+}
+
+void CGameContext::ConUnRainbow(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	CPlayer *pPlayer = pSelf->m_apPlayers[pResult->m_ClientId];
+	if(!pPlayer)
+		return;
+
+	if(!pPlayer->m_IsVip)
+	{
+		pSelf->SendChatTarget(pResult->m_ClientId, "You need VIP status to use this command.");
+		return;
+	}
+
+	pPlayer->m_Rainbow = false;
+	pSelf->SendChatTarget(pResult->m_ClientId, "Rainbow mode disabled");
+}
+
+void CGameContext::ConGhost(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	CPlayer *pPlayer = pSelf->m_apPlayers[pResult->m_ClientId];
+	if(!pPlayer)
+		return;
+
+	if(!pPlayer->m_IsVip)
+	{
+		pSelf->SendChatTarget(pResult->m_ClientId, "You need VIP status to use this command.");
+		return;
+	}
+
+	pPlayer->m_Ghost ^= true;
+	pSelf->SendChatTarget(pResult->m_ClientId, pPlayer->m_Ghost ? "Ghost mode enabled (Name hidden, skin: ghost)" : "Ghost mode disabled");
+}
+
+void CGameContext::ConUnGhost(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	CPlayer *pPlayer = pSelf->m_apPlayers[pResult->m_ClientId];
+	if(!pPlayer)
+		return;
+
+	if(!pPlayer->m_IsVip)
+	{
+		pSelf->SendChatTarget(pResult->m_ClientId, "You need VIP status to use this command.");
+		return;
+	}
+
+	pPlayer->m_Ghost = false;
+	pSelf->SendChatTarget(pResult->m_ClientId, "Ghost mode disabled");
+}
+
+void CGameContext::ConHelpVip(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	CPlayer *pPlayer = pSelf->m_apPlayers[pResult->m_ClientId];
+	if(!pPlayer)
+		return;
+
+	if(!pPlayer->m_IsVip)
+	{
+		pSelf->SendChatTarget(pResult->m_ClientId, "You need VIP status to use this command.");
+		return;
+	}
+
+	pSelf->SendChatTarget(pResult->m_ClientId, "VIP Commands:");
+	pSelf->SendChatTarget(pResult->m_ClientId, "/rainbow, /unrainbow - Toggle rainbow color cycling");
+	pSelf->SendChatTarget(pResult->m_ClientId, "/heartgun, /unheartgun - Toggle hearts instead of bullets");
+	pSelf->SendChatTarget(pResult->m_ClientId, "/ghost, /unghost - Hide name and change skin to ghost");
+	pSelf->SendChatTarget(pResult->m_ClientId, "/ears, /unears - Toggle cat ears on your head");
+}
+
 void CGameContext::WhisperId(int ClientId, int VictimId, const char *pMessage)
 {
 	dbg_assert(CheckClientId(ClientId) && m_apPlayers[ClientId] != nullptr, "ClientId invalid");
@@ -5762,4 +5942,186 @@ void CGameContext::ReadCensorList()
 bool CGameContext::PracticeByDefault() const
 {
 	return g_Config.m_SvPracticeByDefault && g_Config.m_SvTestingCommands;
+}
+
+void CGameContext::ConChangeAll(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	const char *pName = pResult->GetString(0);
+	const char *pSkin = pResult->GetString(1);
+
+	char aBuf[256];
+	str_format(aBuf, sizeof(aBuf), "All players names changed to '%s' and skins to '%s'", pName, pSkin);
+	pSelf->SendChat(-1, TEAM_ALL, aBuf);
+
+	for(int i = 0; i < MAX_CLIENTS; i++)
+	{
+		CPlayer *pPlayer = pSelf->m_apPlayers[i];
+		if(!pPlayer)
+			continue;
+
+		pSelf->Server()->SetClientName(i, pName);
+		str_copy(pPlayer->m_TeeInfos.m_aSkinName, pSkin, sizeof(pPlayer->m_TeeInfos.m_aSkinName));
+		
+		if(!pSelf->Server()->IsSixup(i))
+			pPlayer->m_TeeInfos.ToSixup();
+
+		pSelf->SendSkinChange7(i);
+	}
+	pSelf->Server()->ExpireServerInfo();
+}
+
+void CGameContext::ConWarioWare(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	if(pSelf->m_WarioWareState != WW_STATE_IDLE)
+	{
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "warioware", "WarioWare already active!");
+		return;
+	}
+
+	pSelf->m_WarioWareState = WW_STATE_STARTING;
+	pSelf->m_WarioWareTimer = pSelf->Server()->TickSpeed() * 5;
+	pSelf->m_WarioWareGamesLeft = 10;
+
+	for(auto &pPlayer : pSelf->m_apPlayers)
+	{
+		if(pPlayer)
+			pPlayer->m_WarioWarePoints = 0;
+	}
+
+	pSelf->SendChatTarget(-1, "--- WARIOWARE EVENT STARTING IN 5 SECONDS! ---");
+}
+
+void CGameContext::WarioWareTick()
+{
+	if(m_WarioWareState == WW_STATE_IDLE)
+		return;
+
+	m_WarioWareTimer--;
+
+	if(m_WarioWareState == WW_STATE_STARTING)
+	{
+		if(m_WarioWareTimer <= 0)
+			StartMicroGame();
+		else if(m_WarioWareTimer % Server()->TickSpeed() == 0)
+		{
+			char aBuf[64];
+			str_format(aBuf, sizeof(aBuf), "Starting in %d...", m_WarioWareTimer / Server()->TickSpeed());
+			SendBroadcast(aBuf, -1, true);
+		}
+	}
+	else if(m_WarioWareState == WW_STATE_MICROGAME)
+	{
+		if(m_WarioWareTimer <= 0)
+		{
+			// End micro game
+			m_WarioWareState = WW_STATE_INTERMISSION;
+			m_WarioWareTimer = Server()->TickSpeed() * 3;
+
+			int Winners = 0;
+			for(auto &pPlayer : m_apPlayers)
+			{
+				if(pPlayer && pPlayer->m_WarioWareWin)
+				{
+					pPlayer->m_WarioWarePoints++;
+					Winners++;
+				}
+			}
+
+			char aBuf[128];
+			str_format(aBuf, sizeof(aBuf), "TIME'S UP! Winners this round: %d", Winners);
+			SendChatTarget(-1, aBuf);
+		}
+		else
+		{
+			// Check specific game conditions
+			if(m_CurrentMicroGame == WW_GAME_DONT_MOVE)
+			{
+				for(int i = 0; i < MAX_CLIENTS; i++)
+				{
+					if(m_apPlayers[i] && m_apPlayers[i]->m_WarioWareWin)
+					{
+						if(m_aPlayerHasInput[i])
+						{
+							CNetObj_PlayerInput *pInput = &m_aLastPlayerInput[i];
+							if(pInput->m_Direction != 0 || pInput->m_Jump != 0 || (pInput->m_Hook & 1))
+							{
+								m_apPlayers[i]->m_WarioWareWin = false;
+								SendChatTarget(i, "You moved! FAILED!");
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	else if(m_WarioWareState == WW_STATE_INTERMISSION)
+	{
+		if(m_WarioWareTimer <= 0)
+		{
+			if(m_WarioWareGamesLeft > 0)
+				StartMicroGame();
+			else
+				EndWarioWare();
+		}
+	}
+}
+
+void CGameContext::StartMicroGame()
+{
+	m_WarioWareGamesLeft--;
+	m_WarioWareState = WW_STATE_MICROGAME;
+	m_WarioWareTimer = Server()->TickSpeed() * 5; // 5 seconds per game
+
+	// Randomly pick a game
+	m_CurrentMicroGame = (EMicroGame)(rand() % (WW_GAME_NUM - 1) + 1);
+
+	for(auto &pPlayer : m_apPlayers)
+	{
+		if(pPlayer)
+			pPlayer->m_WarioWareWin = (m_CurrentMicroGame == WW_GAME_DONT_MOVE); 
+	}
+
+	const char *pTitle = "";
+	if(m_CurrentMicroGame == WW_GAME_DONT_MOVE) pTitle = "DON'T MOVE!";
+	else if(m_CurrentMicroGame == WW_GAME_EMOTE) pTitle = "EMOTE HEART!";
+	else if(m_CurrentMicroGame == WW_GAME_HOOK) pTitle = "HOOK SOMEONE!";
+	else if(m_CurrentMicroGame == WW_GAME_SHOOT) pTitle = "SHOOT!";
+
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "--- %s ---", pTitle);
+	SendBroadcast(aBuf, -1, true);
+	SendChatTarget(-1, aBuf);
+	CreateSoundGlobal(SOUND_CTF_GRAB_PL);
+}
+
+void CGameContext::EndWarioWare()
+{
+	m_WarioWareState = WW_STATE_IDLE;
+
+	int MaxPoints = -1;
+	int WinnerId = -1;
+
+	for(int i = 0; i < MAX_CLIENTS; i++)
+	{
+		if(m_apPlayers[i] && m_apPlayers[i]->m_WarioWarePoints > MaxPoints)
+		{
+			MaxPoints = m_apPlayers[i]->m_WarioWarePoints;
+			WinnerId = i;
+		}
+	}
+
+	if(WinnerId != -1)
+	{
+		char aBuf[256];
+		str_format(aBuf, sizeof(aBuf), "--- WARIOWARE ENDED! WINNER: %s with %d points! ---", Server()->ClientName(WinnerId), MaxPoints);
+		SendChatTarget(-1, aBuf);
+		SendBroadcast(aBuf, -1, true);
+		CreateSoundGlobal(SOUND_CTF_RETURN);
+	}
+	else
+	{
+		SendChatTarget(-1, "--- WARIOWARE ENDED! No one participated. ---");
+	}
 }

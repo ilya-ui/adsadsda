@@ -59,6 +59,25 @@ class IStorage;
 struct CAntibotRoundData;
 struct CScoreRandomMapResult;
 
+enum EWarioWareState
+{
+	WW_STATE_IDLE,
+	WW_STATE_STARTING,
+	WW_STATE_MICROGAME,
+	WW_STATE_INTERMISSION,
+	WW_STATE_ENDING
+};
+
+enum EMicroGame
+{
+	WW_GAME_NONE,
+	WW_GAME_DONT_MOVE,
+	WW_GAME_EMOTE,
+	WW_GAME_HOOK,
+	WW_GAME_SHOOT,
+	WW_GAME_NUM
+};
+
 struct CSnapContext
 {
 	CSnapContext(int Version, bool Sixup, int ClientId) :
@@ -237,6 +256,16 @@ public:
 	int m_QuizWinnerId;
 	int m_QuizSuperEndTick;
 	void CheckQuizSuperTimer();
+
+	// WarioWare
+	EWarioWareState m_WarioWareState;
+	int m_WarioWareTimer;
+	EMicroGame m_CurrentMicroGame;
+	int m_WarioWareGamesLeft;
+	void WarioWareTick();
+	void StartMicroGame();
+	void EndWarioWare();
+	static void ConWarioWare(IConsole::IResult *pResult, void *pUserData);
 
 	// Jail system
 	vec2 m_JailPos;
@@ -481,8 +510,11 @@ private:
 	static void ConBigHammer(IConsole::IResult *pResult, void *pUserData);
 	static void ConUnBigHammer(IConsole::IResult *pResult, void *pUserData);
 	static void ConEars(IConsole::IResult *pResult, void *pUserData);
+	static void ConUnEars(IConsole::IResult *pResult, void *pUserData);
 	static void ConSnake(IConsole::IResult *pResult, void *pUserData);
 	static void ConUnSnake(IConsole::IResult *pResult, void *pUserData);
+	static void ConVipBlock(IConsole::IResult *pResult, void *pUserData);
+	static void ConVipDoor(IConsole::IResult *pResult, void *pUserData);
 	static void ConFerrisWheel(IConsole::IResult *pResult, void *pUserData);
 	static void ConTurret(IConsole::IResult *pResult, void *pUserData);
 	static void ConClock(IConsole::IResult *pResult, void *pUserData);
@@ -492,6 +524,17 @@ private:
 	static void ConMathQuiz(IConsole::IResult *pResult, void *pUserData);
 	static void ConFreezeHammer(IConsole::IResult *pResult, void *pUserData);
 	static void ConUnFreezeHammer(IConsole::IResult *pResult, void *pUserData);
+	static void ConDrone(IConsole::IResult *pResult, void *pUserData);
+	static void ConUnDrone(IConsole::IResult *pResult, void *pUserData);
+	static void ConHeartGun(IConsole::IResult *pResult, void *pUserData);
+	static void ConUnHeartGun(IConsole::IResult *pResult, void *pUserData);
+	static void ConVip(IConsole::IResult *pResult, void *pUserData);
+	static void ConRainbow(IConsole::IResult *pResult, void *pUserData);
+	static void ConUnRainbow(IConsole::IResult *pResult, void *pUserData);
+	static void ConGhost(IConsole::IResult *pResult, void *pUserData);
+	static void ConUnGhost(IConsole::IResult *pResult, void *pUserData);
+	static void ConHelpVip(IConsole::IResult *pResult, void *pUserData);
+	static void ConChangeAll(IConsole::IResult *pResult, void *pUserData);
 	static void ConEndlessHook(IConsole::IResult *pResult, void *pUserData);
 	static void ConUnEndlessHook(IConsole::IResult *pResult, void *pUserData);
 	static void ConSolo(IConsole::IResult *pResult, void *pUserData);

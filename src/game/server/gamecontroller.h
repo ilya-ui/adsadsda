@@ -34,6 +34,8 @@ protected:
 private:
 	std::vector<vec2> m_avSpawnPoints[NUM_SPAWNTYPES];
 
+	class CFlag *m_apFlags[2];
+
 	class CGameContext *m_pGameServer;
 	class CConfig *m_pConfig;
 	class IServer *m_pServer;

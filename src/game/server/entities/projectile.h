@@ -19,6 +19,7 @@ public:
 		bool Explosive,
 		int SoundImpact,
 		vec2 InitDir,
+		bool IsHeart = false,
 		int Layer = 0,
 		int Number = 0);
 
@@ -49,6 +50,7 @@ private:
 	int m_DDRaceTeam;
 	bool m_IsSolo;
 	vec2 m_InitDir;
+	bool m_IsHeart;
 
 public:
 	void SetBouncing(int Value);

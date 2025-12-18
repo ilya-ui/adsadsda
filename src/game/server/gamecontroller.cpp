@@ -10,6 +10,7 @@
 #include "entities/pickup.h"
 #include "entities/projectile.h"
 #include "gamecontext.h"
+#include "entities/flag.h"
 #include "player.h"
 
 #include <engine/shared/config.h>
@@ -29,13 +30,16 @@ IGameController::IGameController(class CGameContext *pGameServer) :
 	m_pServer = m_pGameServer->Server();
 	m_pGameType = "unknown";
 
+	m_apFlags[0] = nullptr;
+	m_apFlags[1] = nullptr;
+
 	//
 	DoWarmup(g_Config.m_SvWarmup);
 	m_GameOverTick = -1;
 	m_SuddenDeath = 0;
 	m_RoundStartTick = Server()->Tick();
 	m_RoundCount = 0;
-	m_GameFlags = 0;
+	m_GameFlags = GAMEFLAG_FLAGS;
 	m_aMapWish[0] = 0;
 
 	m_CurrentRecord.reset();
@@ -200,6 +204,27 @@ bool IGameController::OnEntity(int Index, int x, int y, int Layer, int Flags, bo
 	{
 		const int SpawnType = Index - ENTITY_SPAWN;
 		m_avSpawnPoints[SpawnType].push_back(Pos);
+		
+		// Spawn flags if they don't exist yet and we have a spawn point
+		if(Index == ENTITY_SPAWN_RED && !m_apFlags[0])
+			m_apFlags[0] = new CFlag(&GameServer()->m_World, TEAM_RED, Pos);
+		if(Index == ENTITY_SPAWN_BLUE && !m_apFlags[1])
+			m_apFlags[1] = new CFlag(&GameServer()->m_World, TEAM_BLUE, Pos);
+	}
+	else if((Index == ENTITY_FLAGSTAND_RED || Index == ENTITY_FLAGSTAND_BLUE) && Initial)
+	{
+		const int Team = (Index == ENTITY_FLAGSTAND_RED) ? TEAM_RED : TEAM_BLUE;
+		const int FlagIdx = (Index == ENTITY_FLAGSTAND_RED) ? 0 : 1;
+		
+		if(m_apFlags[FlagIdx])
+		{
+			// If we already spawned at a spawn point, move it to the stand
+			m_apFlags[FlagIdx]->Reset();
+			// We might need a way to set stand pos, but Reset uses it.
+			// For now, let's just delete the old one and create new one at stand.
+			delete m_apFlags[FlagIdx];
+		}
+		m_apFlags[FlagIdx] = new CFlag(&GameServer()->m_World, Team, Pos);
 	}
 	else if(Index == ENTITY_DOOR)
 	{
@@ -447,6 +472,12 @@ void IGameController::OnPlayerDisconnect(class CPlayer *pPlayer, const char *pRe
 
 		str_format(aBuf, sizeof(aBuf), "leave player='%d:%s'", ClientId, Server()->ClientName(ClientId));
 		GameServer()->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "game", aBuf);
+		
+		for(int i = 0; i < 2; i++)
+		{
+			if(m_apFlags[i] && m_apFlags[i]->GetCarrier() == ClientId)
+				m_apFlags[i]->Respawn();
+		}
 	}
 }
 
@@ -511,6 +542,11 @@ void IGameController::OnReset()
 
 int IGameController::OnCharacterDeath(class CCharacter *pVictim, class CPlayer *pKiller, int Weapon)
 {
+	for(int i = 0; i < 2; i++)
+	{
+		if(m_apFlags[i] && m_apFlags[i]->GetCarrier() == pVictim->GetPlayer()->GetCid())
+			m_apFlags[i]->Respawn();
+	}
 	return 0;
 }
 
@@ -664,6 +700,17 @@ void IGameController::Snap(int SnappingClient)
 			pGameData->m_GameStateFlags |= protocol7::GAMESTATEFLAG_PAUSED;
 
 		pGameData->m_GameStateEndTick = 0;
+
+		protocol7::CNetObj_GameDataFlag *pFlagData = Server()->SnapNewItem<protocol7::CNetObj_GameDataFlag>(0);
+		if(pFlagData)
+		{
+			pFlagData->m_FlagCarrierRed = m_apFlags[0] ? m_apFlags[0]->GetCarrier() : protocol7::FLAG_MISSING;
+			pFlagData->m_FlagCarrierBlue = m_apFlags[1] ? m_apFlags[1]->GetCarrier() : protocol7::FLAG_MISSING;
+			if(m_apFlags[0] && pFlagData->m_FlagCarrierRed == -1) pFlagData->m_FlagCarrierRed = protocol7::FLAG_ATSTAND;
+			if(m_apFlags[1] && pFlagData->m_FlagCarrierBlue == -1) pFlagData->m_FlagCarrierBlue = protocol7::FLAG_ATSTAND;
+			pFlagData->m_FlagDropTickRed = 0;
+			pFlagData->m_FlagDropTickBlue = 0;
+		}
 
 		protocol7::CNetObj_GameDataRace *pRaceData = Server()->SnapNewItem<protocol7::CNetObj_GameDataRace>(0);
 		if(!pRaceData)

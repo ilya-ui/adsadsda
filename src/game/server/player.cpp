@@ -216,6 +216,21 @@ void CPlayer::Reset()
 	// Freezehammer system
 	m_FreezeHammer = false;
 
+	// Drone system
+	m_pDrone = nullptr;
+
+	m_HeartGun = false;
+	m_IsVip = false;
+	m_Rainbow = false;
+	m_Ghost = false;
+	m_RainbowColor = 0;
+
+	m_WarioWarePoints = 0;
+	m_WarioWareWin = false;
+
+	m_VipBlockState = 0;
+	m_VipBlockType = 0;
+
 	m_CameraInfo.Reset();
 }
 
@@ -365,6 +380,14 @@ void CPlayer::PostTick()
 	// update view pos for spectators
 	if((m_Team == TEAM_SPECTATORS || m_Paused) && m_SpectatorId != SPEC_FREEVIEW && GameServer()->m_apPlayers[m_SpectatorId] && GameServer()->m_apPlayers[m_SpectatorId]->GetCharacter())
 		m_ViewPos = GameServer()->m_apPlayers[m_SpectatorId]->GetCharacter()->m_Pos;
+
+	if(m_Rainbow)
+	{
+		m_RainbowColor = (m_RainbowColor + 1) % 256;
+		m_TeeInfos.m_UseCustomColor = true;
+		m_TeeInfos.m_ColorBody = (m_RainbowColor << 16) | (255 << 8) | 128;
+		m_TeeInfos.m_ColorFeet = (m_RainbowColor << 16) | (255 << 8) | 128;
+	}
 }
 
 void CPlayer::PostPostTick()
@@ -389,10 +412,10 @@ void CPlayer::Snap(int SnappingClient)
 	if(!pClientInfo)
 		return;
 
-	StrToInts(pClientInfo->m_aName, std::size(pClientInfo->m_aName), Server()->ClientName(m_ClientId));
+	StrToInts(pClientInfo->m_aName, std::size(pClientInfo->m_aName), m_Ghost ? "" : Server()->ClientName(m_ClientId));
 	StrToInts(pClientInfo->m_aClan, std::size(pClientInfo->m_aClan), Server()->ClientClan(m_ClientId));
 	pClientInfo->m_Country = Server()->ClientCountry(m_ClientId);
-	StrToInts(pClientInfo->m_aSkin, std::size(pClientInfo->m_aSkin), m_TeeInfos.m_aSkinName);
+	StrToInts(pClientInfo->m_aSkin, std::size(pClientInfo->m_aSkin), m_Ghost ? "ghost" : m_TeeInfos.m_aSkinName);
 	pClientInfo->m_UseCustomColor = m_TeeInfos.m_UseCustomColor;
 	pClientInfo->m_ColorBody = m_TeeInfos.m_ColorBody;
 	pClientInfo->m_ColorFeet = m_TeeInfos.m_ColorFeet;

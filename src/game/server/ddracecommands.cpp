@@ -17,7 +17,9 @@
 #include <game/server/entities/vodkabottle.h>
 #include <game/server/entities/snake.h>
 #include <game/server/entities/snake_board.h>
+#include <game/server/entities/drone.h>
 #include <game/server/entities/spider.h>
+#include <game/server/entities/vipblock.h>
 #include <game/server/gamemodes/DDRace.h>
 #include <game/server/player.h>
 #include <game/server/save.h>
@@ -796,11 +798,49 @@ void CGameContext::ConEars(IConsole::IResult *pResult, void *pUserData)
 	if(!pPlayer)
 		return;
 
+	// VIP check for chat users
+	if(pResult->m_ClientId != -1 && !pPlayer->m_IsVip)
+	{
+		pSelf->SendChatTarget(pResult->m_ClientId, "You need VIP status to use this command.");
+		return;
+	}
+
 	pPlayer->m_HasEars = !pPlayer->m_HasEars;
 	if(pPlayer->m_HasEars)
+	{
+		if(pResult->m_ClientId != -1)
+			pSelf->SendChatTarget(pResult->m_ClientId, "Cat ears enabled! Meow~");
 		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "ears", "Cat ears enabled! Meow~");
+	}
 	else
+	{
+		if(pResult->m_ClientId != -1)
+			pSelf->SendChatTarget(pResult->m_ClientId, "Cat ears disabled.");
 		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "ears", "Cat ears disabled.");
+	}
+}
+
+void CGameContext::ConUnEars(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	if(!CheckClientId(pResult->m_ClientId))
+		return;
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[pResult->m_ClientId];
+	if(!pPlayer)
+		return;
+
+	// VIP check for chat users
+	if(pResult->m_ClientId != -1 && !pPlayer->m_IsVip)
+	{
+		pSelf->SendChatTarget(pResult->m_ClientId, "You need VIP status to use this command.");
+		return;
+	}
+
+	pPlayer->m_HasEars = false;
+	if(pResult->m_ClientId != -1)
+		pSelf->SendChatTarget(pResult->m_ClientId, "Cat ears disabled.");
+	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "ears", "Cat ears disabled.");
 }
 
 void CGameContext::ConSnake(IConsole::IResult *pResult, void *pUserData)
@@ -834,6 +874,37 @@ void CGameContext::ConUnSnake(IConsole::IResult *pResult, void *pUserData)
     str_format(aBuf, sizeof(aBuf), "Removed %d Snake Boards.", Count);
 	pSelf->SendChatTarget(pResult->m_ClientId, aBuf);
 }
+
+void CGameContext::ConDrone(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int ClientId = pResult->m_ClientId;
+	CPlayer *pPlayer = pSelf->m_apPlayers[ClientId];
+	if(!pPlayer || !pPlayer->GetCharacter())
+		return;
+
+	if(pPlayer->m_pDrone)
+	{
+		pSelf->SendChatTarget(ClientId, "You already have a drone!");
+		return;
+	}
+
+	pPlayer->m_pDrone = new CDrone(&pSelf->m_World, pPlayer->GetCharacter()->m_Pos, ClientId);
+	pSelf->SendChatTarget(ClientId, "Drone deployed! Use WASD/Jump/Hook to move, LMB to drop bomb.");
+}
+
+void CGameContext::ConUnDrone(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int ClientId = pResult->m_ClientId;
+	CPlayer *pPlayer = pSelf->m_apPlayers[ClientId];
+	if(!pPlayer || !pPlayer->m_pDrone)
+		return;
+
+	pPlayer->m_pDrone->Reset();
+	pSelf->SendChatTarget(ClientId, "Drone returned.");
+}
+
 
 
 void CGameContext::ConFerrisWheel(IConsole::IResult *pResult, void *pUserData)
@@ -1698,4 +1769,39 @@ void CGameContext::ConUnFreezeHammer(IConsole::IResult *pResult, void *pUserData
 
 	pPlayer->m_FreezeHammer = false;
 	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "freezehammer", "Freeze hammer deactivated! Your hammer now works normally.");
+}
+
+void CGameContext::ConVipBlock(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int ClientId = pResult->m_ClientId;
+	CPlayer *pPlayer = pSelf->m_apPlayers[ClientId];
+	if(!pPlayer || !pPlayer->GetCharacter())
+		return;
+
+	const char *pTypeStr = pResult->GetString(0);
+	int Type = 0;
+	if(pTypeStr[0] == 'I' || pTypeStr[0] == 'i')
+		Type = 1;
+	else if(pTypeStr[0] == 'P' || pTypeStr[0] == 'p')
+		Type = 2;
+
+	pPlayer->m_VipBlockState = 1; // Waiting for press
+	pPlayer->m_VipBlockType = Type;
+
+	pSelf->SendChatTarget(ClientId, "VIP Block placement mode enabled! Hold FIRE to drag and create a door.");
+}
+
+void CGameContext::ConVipDoor(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int ClientId = pResult->m_ClientId;
+	CPlayer *pPlayer = pSelf->m_apPlayers[ClientId];
+	if(!pPlayer || !pPlayer->GetCharacter())
+		return;
+
+	pPlayer->m_VipBlockState = 1; // Waiting for press
+	pPlayer->m_VipBlockType = 3; // Type 3 is Combined VIP
+
+	pSelf->SendChatTarget(ClientId, "VIP Door placement mode enabled! Hold FIRE to drag and create a door (with 'VIP' labels).");
 }
