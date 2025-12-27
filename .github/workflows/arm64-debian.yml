@@ -1,0 +1,42 @@
+name: Build ARM64 Debian 12
+
+on:
+  push:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+jobs:
+  build-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies and build
+        run: |
+          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+          docker run --rm -v ${{ github.workspace }}:/build -w /build debian:12-slim bash -c "
+            apt-get update && \
+            apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu cmake make pkg-config \
+                               libssl-dev:arm64 libcurl4-openssl-dev:arm64 libfreetype6-dev:arm64 \
+                               libglew-dev:arm64 libsdl2-dev:arm64 libsqlite3-dev:arm64 \
+                               python3 git dpkg-dev && \
+            dpkg --add-architecture arm64 && \
+            apt-get update && \
+            apt-get install -y libssl-dev:arm64 libcurl4-openssl-dev:arm64 libfreetype6-dev:arm64 \
+                               libglew-dev:arm64 libsdl2-dev:arm64 libsqlite3-dev:arm64 libpng-dev:arm64 \
+                               libogg-dev:arm64 libvorbis-dev:arm64 libopus-dev:arm64 libopusfile-dev:arm64 && \
+            mkdir -p build-arm64 && cd build-arm64 && \
+            cmake .. -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+                     -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+                     -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
+                     -DPREFER_BUNDLED_LIBS=ON -DVIDEO_RECORDER=OFF -DCLIENT=OFF && \
+            make -j$(nproc) DDNet-Server
+          "
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DDNet-Server-arm64
+          path: build-arm64/DDNet-Server
