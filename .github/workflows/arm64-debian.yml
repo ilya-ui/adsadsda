@@ -33,7 +33,7 @@ jobs:
                      -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
                      -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
                      -DPREFER_BUNDLED_LIBS=ON -DVIDEO_RECORDER=OFF -DCLIENT=OFF -DMYSQL=OFF && \
-            make -j$(nproc) DDNet-Server
+            make -j2 DDNet-Server
           "
 
       - name: Upload Artifact
