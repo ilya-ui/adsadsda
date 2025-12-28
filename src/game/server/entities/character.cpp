@@ -1684,6 +1684,26 @@ bool CCharacter::IsSnappingCharacterInView(int SnappingClientId)
 	return true;
 }
 
+void CCharacter::GetEchoSnap(CNetObj_Character *pOut)
+{
+	m_Core.Write(pOut);
+	pOut->m_Tick = 0;
+	
+	// Расчет угла глаз (как в оригинальном SnapCharacter)
+	if(m_Input.m_TargetX != 0 || m_Input.m_TargetY != 0)
+		pOut->m_Angle = round_to_int(atan2((float)m_Input.m_TargetY, (float)m_Input.m_TargetX) * 256.0f);
+	else
+		pOut->m_Angle = 0;
+
+	pOut->m_Emote = m_EmoteType;
+	pOut->m_AmmoCount = 0;
+	pOut->m_Health = 0;
+	pOut->m_Armor = 0;
+	pOut->m_Weapon = m_Core.m_ActiveWeapon;
+	pOut->m_AttackTick = m_AttackTick;
+	pOut->m_PlayerFlags = m_pPlayer->m_PlayerFlags;
+}
+
 void CCharacter::Snap(int SnappingClient)
 {
 	int Id = m_pPlayer->GetCid();

@@ -58,6 +58,8 @@ void CPlayer::Reset()
 	m_JoinTick = Server()->Tick();
 	delete m_pCharacter;
 	m_pCharacter = nullptr;
+	m_Shadow = false;
+	m_ShadowHistory.clear();
 	SetSpectatorId(SPEC_FREEVIEW);
 	m_LastActionTick = Server()->Tick();
 	m_TeamChangeTick = Server()->Tick();
@@ -320,6 +322,16 @@ void CPlayer::Tick()
 				ProcessPause();
 				if(!m_Paused)
 					m_ViewPos = m_pCharacter->m_Pos;
+
+				// shadow recording
+				if(m_Shadow)
+				{
+					CNetObj_Character Char;
+					m_pCharacter->GetEchoSnap(&Char);
+					m_ShadowHistory.push_back(Char);
+					if((int)m_ShadowHistory.size() > Server()->TickSpeed() * 2)
+						m_ShadowHistory.pop_front();
+				}
 			}
 			else if(!m_pCharacter->IsPaused())
 			{
@@ -407,6 +419,9 @@ void CPlayer::Snap(int SnappingClient)
 	int TranslatedId = m_ClientId;
 	if(!Server()->Translate(TranslatedId, SnappingClient))
 		return;
+
+	// shadow snap
+	SnapShadow(SnappingClient);
 
 	CNetObj_ClientInfo *pClientInfo = Server()->SnapNewItem<CNetObj_ClientInfo>(TranslatedId);
 	if(!pClientInfo)
@@ -1148,6 +1163,74 @@ void CPlayer::CCameraInfo::Write(const CNetMsg_Cl_CameraInfo *Msg)
 	m_Zoom = Msg->m_Zoom / 1000.0f;
 	m_Deadzone = Msg->m_Deadzone;
 	m_FollowFactor = Msg->m_FollowFactor;
+}
+
+void CPlayer::SnapShadow(int SnappingClient)
+{
+	if(!m_Shadow || m_ShadowHistory.empty())
+		return;
+
+	// Faster response: 0.2 seconds (10 ticks)
+	int Delay = 10;
+	int Index = (int)m_ShadowHistory.size() - Delay;
+	if(Index < 0)
+		Index = 0;
+
+	CNetObj_Character Char = m_ShadowHistory[Index];
+
+	// Use an ID offset by 64
+	int GhostId = m_ClientId + 64;
+	if(GhostId >= MAX_CLIENTS)
+		return;
+
+	CNetObj_Character *pChar = Server()->SnapNewItem<CNetObj_Character>(GhostId);
+	if(!pChar)
+		return;
+
+	*pChar = Char;
+
+	// Send ClientInfo for the ghost
+	CNetObj_ClientInfo *pClientInfo = Server()->SnapNewItem<CNetObj_ClientInfo>(GhostId);
+	if(pClientInfo)
+	{
+		StrToInts(pClientInfo->m_aName, std::size(pClientInfo->m_aName), Server()->ClientName(m_ClientId));
+		StrToInts(pClientInfo->m_aClan, std::size(pClientInfo->m_aClan), Server()->ClientClan(m_ClientId));
+		pClientInfo->m_Country = Server()->ClientCountry(m_ClientId);
+		StrToInts(pClientInfo->m_aSkin, std::size(pClientInfo->m_aSkin), m_TeeInfos.m_aSkinName);
+		pClientInfo->m_UseCustomColor = m_TeeInfos.m_UseCustomColor;
+		pClientInfo->m_ColorBody = m_TeeInfos.m_ColorBody;
+		pClientInfo->m_ColorFeet = m_TeeInfos.m_ColorFeet;
+	}
+
+	if(!Server()->IsSixup(SnappingClient))
+	{
+		CNetObj_PlayerInfo *pPlayerInfo = Server()->SnapNewItem<CNetObj_PlayerInfo>(GhostId);
+		if(pPlayerInfo)
+		{
+			pPlayerInfo->m_Latency = 0;
+			pPlayerInfo->m_Score = -9999;
+			pPlayerInfo->m_Local = 0;
+			pPlayerInfo->m_ClientId = GhostId;
+			pPlayerInfo->m_Team = m_Team;
+		}
+	}
+
+	// DDNet Character for flags (no collision etc)
+	CNetObj_DDNetCharacter *pDDNetCharacter = Server()->SnapNewItem<CNetObj_DDNetCharacter>(GhostId);
+	if(pDDNetCharacter)
+	{
+		// Added CHARACTERFLAG_SOLO for transparency
+		pDDNetCharacter->m_Flags = CHARACTERFLAG_COLLISION_DISABLED | CHARACTERFLAG_HOOK_HIT_DISABLED | CHARACTERFLAG_SOLO;
+		pDDNetCharacter->m_FreezeEnd = 0;
+		pDDNetCharacter->m_Jumps = 0;
+		pDDNetCharacter->m_TeleCheckpoint = 0;
+		pDDNetCharacter->m_StrongWeakId = 0;
+		pDDNetCharacter->m_JumpedTotal = 0;
+		pDDNetCharacter->m_NinjaActivationTick = 0;
+		pDDNetCharacter->m_FreezeStart = 0;
+		pDDNetCharacter->m_TargetX = Char.m_X;
+		pDDNetCharacter->m_TargetY = Char.m_Y;
+	}
 }
 
 void CPlayer::CCameraInfo::Reset()

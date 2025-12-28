@@ -249,6 +249,16 @@ public:
 	// Zombie event
 	CZombieEvent m_ZombieEvent;
 
+	// Block Tournament
+	std::vector<vec2> m_vBlockTournamentPoints;
+	bool m_BlockTournamentActive;
+	bool m_BlockTournamentStarted;
+	int m_BlockTournamentWinnerId;
+	int m_BlockTournamentFreezeEndTick;
+
+	// Bot Fighter
+	class CBotFighter *m_pBotFighter;
+
 	// Math Quiz system
 	bool m_QuizActive;
 	int m_QuizAnswer;
@@ -524,6 +534,18 @@ private:
 	static void ConMathQuiz(IConsole::IResult *pResult, void *pUserData);
 	static void ConFreezeHammer(IConsole::IResult *pResult, void *pUserData);
 	static void ConUnFreezeHammer(IConsole::IResult *pResult, void *pUserData);
+	static void ConBanHammer(IConsole::IResult *pResult, void *pUserData);
+	static void ConUnBanHammer(IConsole::IResult *pResult, void *pUserData);
+	static void ConLox(IConsole::IResult *pResult, void *pUserData);
+	static void ConUnLox(IConsole::IResult *pResult, void *pUserData);
+	static void ConBlockTournamentPoint(IConsole::IResult *pResult, void *pUserData);
+	static void ConBlockTournamentStart(IConsole::IResult *pResult, void *pUserData);
+	static void ConBotFighter(IConsole::IResult *pResult, void *pUserData);
+	static void ConUnBotFighter(IConsole::IResult *pResult, void *pUserData);
+	static void ConBigPlayer(IConsole::IResult *pResult, void *pUserData);
+	static void ConUnBigPlayer(IConsole::IResult *pResult, void *pUserData);
+	static void ConTroll(IConsole::IResult *pResult, void *pUserData);
+	static void ConUnTroll(IConsole::IResult *pResult, void *pUserData);
 	static void ConDrone(IConsole::IResult *pResult, void *pUserData);
 	static void ConUnDrone(IConsole::IResult *pResult, void *pUserData);
 	static void ConHeartGun(IConsole::IResult *pResult, void *pUserData);
@@ -580,6 +602,7 @@ private:
 	static void ConCredits(IConsole::IResult *pResult, void *pUserData);
 	static void ConInfo(IConsole::IResult *pResult, void *pUserData);
 	static void ConHelp(IConsole::IResult *pResult, void *pUserData);
+	static void ConShadow(IConsole::IResult *pResult, void *pUserData);
 	static void ConSettings(IConsole::IResult *pResult, void *pUserData);
 	static void ConRules(IConsole::IResult *pResult, void *pUserData);
 	static void ConKill(IConsole::IResult *pResult, void *pUserData);

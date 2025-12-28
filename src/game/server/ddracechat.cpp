@@ -118,6 +118,27 @@ void CGameContext::ConHelp(IConsole::IResult *pResult, void *pUserData)
 	}
 }
 
+void CGameContext::ConShadow(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int ClientId = pResult->m_ClientId;
+	if(!CheckClientId(ClientId))
+		return;
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[ClientId];
+	if(!pPlayer)
+		return;
+
+	pPlayer->m_Shadow = !pPlayer->m_Shadow;
+	if(pPlayer->m_Shadow)
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "chatresp", "Shadow ghost enabled");
+	else
+	{
+		pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "chatresp", "Shadow ghost disabled");
+		pPlayer->m_ShadowHistory.clear();
+	}
+}
+
 void CGameContext::ConSettings(IConsole::IResult *pResult, void *pUserData)
 {
 	CGameContext *pSelf = (CGameContext *)pUserData;

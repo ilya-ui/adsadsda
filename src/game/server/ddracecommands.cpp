@@ -5,7 +5,9 @@
 #include <engine/shared/config.h>
 
 #include <game/server/entities/cannon.h>
-#include <game/server/entities/character.h>
+#include "entities/autoturret.h"
+#include "entities/botfighter.h"
+#include "entities/character.h"
 #include <game/server/entities/ferriswheel.h>
 #include <game/server/entities/helicopter.h>
 #include <game/server/entities/laserclock.h>
@@ -1753,6 +1755,12 @@ void CGameContext::ConFreezeHammer(IConsole::IResult *pResult, void *pUserData)
 	if(!pPlayer)
 		return;
 
+	if(!pPlayer->m_IsVip)
+	{
+		pSelf->SendChatTarget(pResult->m_ClientId, "You need VIP status to use this command.");
+		return;
+	}
+
 	pPlayer->m_FreezeHammer = true;
 	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "freezehammer", "Freeze hammer activated! Your hammer will now freeze players.");
 }
@@ -1767,10 +1775,194 @@ void CGameContext::ConUnFreezeHammer(IConsole::IResult *pResult, void *pUserData
 	if(!pPlayer)
 		return;
 
+	if(!pPlayer->m_IsVip)
+	{
+		pSelf->SendChatTarget(pResult->m_ClientId, "You need VIP status to use this command.");
+		return;
+	}
+
 	pPlayer->m_FreezeHammer = false;
 	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "freezehammer", "Freeze hammer deactivated! Your hammer now works normally.");
 }
 
+void CGameContext::ConBanHammer(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	if(!CheckClientId(pResult->m_ClientId))
+		return;
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[pResult->m_ClientId];
+	if(!pPlayer)
+		return;
+
+	int Time = pResult->NumArguments() > 0 ? pResult->GetInteger(0) : 0;
+
+	pPlayer->m_BanHammer = true;
+	pPlayer->m_BanHammerTime = Time;
+
+	char aBuf[128];
+	if(Time > 0)
+		str_format(aBuf, sizeof(aBuf), "Ban hammer activated! Duration: %d min.", Time);
+	else
+		str_copy(aBuf, "Ban hammer activated! Permanent ban.", sizeof(aBuf));
+
+	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "banhammer", aBuf);
+}
+
+void CGameContext::ConUnBanHammer(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	if(!CheckClientId(pResult->m_ClientId))
+		return;
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[pResult->m_ClientId];
+	if(!pPlayer)
+		return;
+
+	pPlayer->m_BanHammer = false;
+	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "banhammer", "Ban hammer deactivated!");
+}
+
+void CGameContext::ConLox(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int ClientId = pResult->NumArguments() > 0 ? pResult->GetVictim() : pResult->m_ClientId;
+
+	if(!CheckClientId(ClientId))
+		return;
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[ClientId];
+	if(!pPlayer)
+		return;
+
+	// Store original info if not already enabled
+	if(!pPlayer->m_Lox)
+	{
+		str_copy(pPlayer->m_OriginalName, pSelf->Server()->ClientName(ClientId), sizeof(pPlayer->m_OriginalName));
+		str_copy(pPlayer->m_OriginalClan, pSelf->Server()->ClientClan(ClientId), sizeof(pPlayer->m_OriginalClan));
+		pPlayer->m_Lox = true;
+	}
+
+	// \xD0\xBB = л, \xD0\xBE = о, \xD1\x85 = х
+	const char *pLox = "\xD0\xBB\xD0\xBE\xD1\x85";
+	
+	// Set name to "лох" (appears above clan)
+	pSelf->Server()->SetClientName(ClientId, pLox);
+	// Set clan to original name (appears below "лох")
+	pSelf->Server()->SetClientClan(ClientId, pPlayer->m_OriginalName);
+	
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "Lox mode enabled for %s!", pPlayer->m_OriginalName);
+	pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "lox", aBuf);
+}
+
+void CGameContext::ConUnLox(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int ClientId = pResult->NumArguments() > 0 ? pResult->GetVictim() : pResult->m_ClientId;
+
+	if(!CheckClientId(ClientId))
+		return;
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[ClientId];
+	if(!pPlayer)
+		return;
+
+	if(pPlayer->m_Lox)
+	{
+			pPlayer->m_Lox = false;
+			pSelf->Server()->SetClientName(ClientId, pPlayer->m_OriginalName);
+			pSelf->Server()->SetClientClan(ClientId, pPlayer->m_OriginalClan);
+			
+			char aBuf[128];
+			str_format(aBuf, sizeof(aBuf), "Lox mode disabled for %s!", pPlayer->m_OriginalName);
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "lox", aBuf);
+			}
+		}
+		
+		void CGameContext::ConBlockTournamentPoint(IConsole::IResult *pResult, void *pUserData)
+		{
+			CGameContext *pSelf = (CGameContext *)pUserData;
+			if(!CheckClientId(pResult->m_ClientId))
+				return;
+		
+			CCharacter *pChr = pSelf->GetPlayerChar(pResult->m_ClientId);
+			if(!pChr)
+				return;
+		
+			int Index = pResult->GetInteger(0);
+			if(Index < 1 || Index > 5)
+			{
+				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "block_tournament", "Point index must be between 1 and 5.");
+				return;
+			}
+		
+			// Resize vector if needed (Index is 1-based)
+			if((size_t)Index > pSelf->m_vBlockTournamentPoints.size())
+				pSelf->m_vBlockTournamentPoints.resize(Index);
+		
+			pSelf->m_vBlockTournamentPoints[Index - 1] = pChr->m_Pos;
+			
+			char aBuf[128];
+			str_format(aBuf, sizeof(aBuf), "Block Tournament Point %d set.", Index);
+			pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "block_tournament", aBuf);
+		}
+		
+		void CGameContext::ConBlockTournamentStart(IConsole::IResult *pResult, void *pUserData)
+		{
+			CGameContext *pSelf = (CGameContext *)pUserData;
+		
+			if(pSelf->m_vBlockTournamentPoints.empty())
+			{
+				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "block_tournament", "No spawn points set! Use /block_tournament_point first.");
+				return;
+			}
+		
+			int PlayersFound = 0;
+			int PointIndex = 0;
+		
+			for(int i = 0; i < MAX_CLIENTS; i++)
+			{
+				CPlayer *pPlayer = pSelf->m_apPlayers[i];
+				if(pPlayer && pPlayer->GetTeam() != TEAM_SPECTATORS && pPlayer->GetCharacter())
+				{
+					pPlayer->m_InBlockTournament = true;
+					
+					// Clear all previous freeze states
+					pPlayer->GetCharacter()->UnFreeze();
+					pPlayer->GetCharacter()->SetDeepFrozen(false);
+					pPlayer->GetCharacter()->SetLiveFrozen(false);
+
+					// Freeze for 3 seconds
+					pPlayer->GetCharacter()->Freeze(3);
+					
+					// Teleport to next point, loop around
+					vec2 SpawnPos = pSelf->m_vBlockTournamentPoints[PointIndex % pSelf->m_vBlockTournamentPoints.size()];
+					pPlayer->GetCharacter()->SetPosition(SpawnPos);
+					pPlayer->GetCharacter()->ResetVelocity();
+					
+					PointIndex++;
+					PlayersFound++;
+				}
+				else if(pPlayer)
+				{
+					pPlayer->m_InBlockTournament = false;
+				}
+			}
+		
+			if(PlayersFound > 0)
+			{
+				pSelf->m_BlockTournamentActive = true;
+				pSelf->m_BlockTournamentStarted = false;
+				pSelf->m_BlockTournamentWinnerId = -1;
+				pSelf->m_BlockTournamentFreezeEndTick = pSelf->Server()->Tick() + pSelf->Server()->TickSpeed() * 3;
+				pSelf->SendChat(-1, TEAM_ALL, "Block Tournament Started! You are frozen for 3 seconds. Fight! Don't get frozen!");
+			}
+			else
+			{
+				pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "block_tournament", "No active players found to start tournament.");
+			}
+		}
 void CGameContext::ConVipBlock(IConsole::IResult *pResult, void *pUserData)
 {
 	CGameContext *pSelf = (CGameContext *)pUserData;
@@ -1804,4 +1996,145 @@ void CGameContext::ConVipDoor(IConsole::IResult *pResult, void *pUserData)
 	pPlayer->m_VipBlockType = 3; // Type 3 is Combined VIP
 
 	pSelf->SendChatTarget(ClientId, "VIP Door placement mode enabled! Hold FIRE to drag and create a door (with 'VIP' labels).");
+}
+
+void CGameContext::ConBotFighter(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+    if(pSelf->m_pBotFighter)
+    {
+        pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "botfighter", "Bot Fighter already exists!");
+        return;
+    }
+    
+    int ClientId = pResult->m_ClientId;
+    vec2 SpawnPos = vec2(100, 100);
+    
+    if(ClientId >= 0 && pSelf->m_apPlayers[ClientId] && pSelf->m_apPlayers[ClientId]->GetCharacter())
+    {
+        SpawnPos = pSelf->m_apPlayers[ClientId]->GetCharacter()->GetPos();
+    }
+    else
+    {
+         for(int i=0; i<MAX_CLIENTS; i++)
+         {
+             if(pSelf->m_apPlayers[i] && pSelf->m_apPlayers[i]->GetCharacter())
+             {
+                 SpawnPos = pSelf->m_apPlayers[i]->GetCharacter()->GetPos();
+                 break;
+             }
+         }
+    }
+    
+    pSelf->m_pBotFighter = new CBotFighter(&pSelf->m_World, SpawnPos);
+    pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "botfighter", "Bot Fighter Spawned!");
+}
+
+void CGameContext::ConUnBotFighter(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+    if(pSelf->m_pBotFighter)
+    {
+        pSelf->m_pBotFighter->Reset();
+        pSelf->m_pBotFighter = nullptr;
+        pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "botfighter", "Bot Fighter Removed!");
+    }
+    else
+    {
+        pSelf->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "botfighter", "No Bot Fighter active!");
+    }
+}
+
+void CGameContext::ConBigPlayer(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int ClientId = pResult->NumArguments() > 0 ? pResult->GetVictim() : pResult->m_ClientId;
+
+	if(!CheckClientId(ClientId))
+		return;
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[ClientId];
+	if(!pPlayer)
+		return;
+
+    pPlayer->m_BigPlayer = true;
+    
+    // Refresh tuning if alive
+    if(pPlayer->GetCharacter())
+        pPlayer->GetCharacter()->HandleTuneLayer();
+
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "'%s' is now BIG!", pSelf->Server()->ClientName(ClientId));
+	pSelf->SendChatTarget(-1, aBuf);
+}
+
+void CGameContext::ConUnBigPlayer(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int ClientId = pResult->NumArguments() > 0 ? pResult->GetVictim() : pResult->m_ClientId;
+
+	if(!CheckClientId(ClientId))
+		return;
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[ClientId];
+	if(!pPlayer)
+		return;
+
+    pPlayer->m_BigPlayer = false;
+    
+    // Refresh tuning if alive
+    if(pPlayer->GetCharacter())
+        pPlayer->GetCharacter()->HandleTuneLayer();
+
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "'%s' is now normal size.", pSelf->Server()->ClientName(ClientId));
+	pSelf->SendChatTarget(-1, aBuf);
+}
+
+
+
+void CGameContext::ConTroll(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int ClientId = pResult->NumArguments() > 0 ? pResult->GetVictim() : pResult->m_ClientId;
+
+	if(!CheckClientId(ClientId))
+		return;
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[ClientId];
+	if(!pPlayer)
+		return;
+
+	pPlayer->m_Troll = true;
+	
+	// Refresh tuning if alive
+	if(pPlayer->GetCharacter())
+		pPlayer->GetCharacter()->HandleTuneLayer();
+
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "'%s' is now being TROLLED!", pSelf->Server()->ClientName(ClientId));
+	pSelf->SendChatTarget(-1, aBuf);
+}
+
+void CGameContext::ConUnTroll(IConsole::IResult *pResult, void *pUserData)
+{
+	CGameContext *pSelf = (CGameContext *)pUserData;
+	int ClientId = pResult->NumArguments() > 0 ? pResult->GetVictim() : pResult->m_ClientId;
+
+	if(!CheckClientId(ClientId))
+		return;
+
+	CPlayer *pPlayer = pSelf->m_apPlayers[ClientId];
+	if(!pPlayer)
+		return;
+
+	pPlayer->m_Troll = false;
+	
+	// Refresh tuning if alive
+	if(pPlayer->GetCharacter())
+		pPlayer->GetCharacter()->HandleTuneLayer();
+
+	char aBuf[128];
+	str_format(aBuf, sizeof(aBuf), "'%s' is no longer being trolled.", pSelf->Server()->ClientName(ClientId));
+	pSelf->SendChatTarget(-1, aBuf);
 }

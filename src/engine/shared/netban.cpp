@@ -211,11 +211,11 @@ template<class T>
 int CNetBan::Ban(T *pBanPool, const typename T::CDataType *pData, int Seconds, const char *pReason, bool VerbatimReason)
 {
 	// do not ban localhost
-	if(NetMatch(pData, &m_LocalhostIpV4) || NetMatch(pData, &m_LocalhostIpV6))
+	/*if(NetMatch(pData, &m_LocalhostIpV4) || NetMatch(pData, &m_LocalhostIpV6))
 	{
 		Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "net_ban", "ban failed (localhost)");
 		return -1;
-	}
+	}*/
 
 	int64_t Stamp = Seconds > 0 ? time_timestamp() + Seconds : static_cast<int64_t>(CBanInfo::EXPIRES_NEVER);
 

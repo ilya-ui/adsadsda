@@ -2806,6 +2806,8 @@ if(SERVER)
     entities/autoturret.h
     entities/autotank.cpp
     entities/autotank.h
+    entities/botfighter.cpp
+    entities/botfighter.h
     entities/autocannon.cpp
     entities/autocannon.h
     entities/ufo.cpp

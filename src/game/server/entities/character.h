@@ -41,6 +41,7 @@ public:
 	void TickDeferred() override;
 	void TickPaused() override;
 	void Snap(int SnappingClient) override;
+	void GetEchoSnap(CNetObj_Character *pOut);
 	void SwapClients(int Client1, int Client2) override;
 
 	void PostGlobalSnap();
@@ -181,7 +182,6 @@ private:
 	void DDRaceTick();
 	void DDRacePostCoreTick();
 	void HandleBroadcast();
-	void HandleTuneLayer();
 	void SendZoneMsgs();
 	IAntibot *Antibot();
 
@@ -189,6 +189,7 @@ private:
 	CSaveTee m_RescueTee[NUM_RESCUEMODES];
 
 public:
+	void HandleTuneLayer();
 	CGameTeams *Teams() { return m_pTeams; }
 	void SetTeams(CGameTeams *pTeams);
 	bool TrySetRescue(int RescueMode);

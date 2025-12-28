@@ -20,16 +20,19 @@ jobs:
             dpkg --add-architecture arm64 && \
             apt-get update && \
             apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu cmake make pkg-config \
-                               git python3 dpkg-dev \
-                               libssl-dev:arm64 libcurl4-openssl-dev:arm64 libfreetype6-dev:arm64 \
+                               git python3 dpkg-dev rustc cargo \
+                               libssl-dev:arm64 libcurl4-openssl-dev:arm64 libfreetype-dev:arm64 \
                                libglew-dev:arm64 libsdl2-dev:arm64 libsqlite3-dev:arm64 libpng-dev:arm64 \
-                               libogg-dev:arm64 libvorbis-dev:arm64 libopus-dev:arm64 libopusfile-dev:arm64 && \
+                               libogg-dev:arm64 libvorbis-dev:arm64 libopus-dev:arm64 libopusfile-dev:arm64 \
+                               zlib1g-dev:arm64 && \
             mkdir -p build-arm64 && cd build-arm64 && \
-            export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig && \
+            export PKG_CONFIG_DIR= && \
+            export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig && \
+            export PKG_CONFIG_SYSROOT_DIR=/ && \
             cmake .. -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
                      -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
                      -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
-                     -DPREFER_BUNDLED_LIBS=ON -DVIDEO_RECORDER=OFF -DCLIENT=OFF && \
+                     -DPREFER_BUNDLED_LIBS=ON -DVIDEO_RECORDER=OFF -DCLIENT=OFF -DMYSQL=OFF && \
             make -j$(nproc) DDNet-Server
           "
 

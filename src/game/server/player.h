@@ -14,6 +14,7 @@
 
 #include <memory>
 #include <optional>
+#include <deque>
 
 class CCharacter;
 class CGameContext;
@@ -282,6 +283,7 @@ public:
 
 	// BigHammer system
 	bool m_HasBigHammer;
+	bool m_BigPlayer;
 
 	// Spider system
 	bool m_InSpider;
@@ -297,6 +299,21 @@ public:
 
 	// Freezehammer system
 	bool m_FreezeHammer;
+
+	// Banhammer system
+	bool m_BanHammer;
+	int m_BanHammerTime;
+
+	// Lox system
+	bool m_Lox;
+	char m_OriginalName[MAX_NAME_LENGTH];
+	char m_OriginalClan[MAX_CLAN_LENGTH];
+
+	// Block Tournament
+	bool m_InBlockTournament;
+
+	// Troll system
+	bool m_Troll;
 
 	// Drone system
 	class CDrone *m_pDrone;
@@ -316,6 +333,11 @@ public:
 	// WarioWare
 	int m_WarioWarePoints;
 	bool m_WarioWareWin;
+
+	// shadow
+	bool m_Shadow;
+	std::deque<CNetObj_Character> m_ShadowHistory;
+	void SnapShadow(int SnappingClient);
 };
 
 #endif
